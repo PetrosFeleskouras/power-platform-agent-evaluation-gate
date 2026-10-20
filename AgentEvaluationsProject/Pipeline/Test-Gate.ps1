@@ -74,7 +74,7 @@ Test-Case 'Incomplete case is rejected' { $r=Copy-Result; $r.testCasesResults[0]
 Test-Case 'Incomplete run is rejected' { $r=Copy-Result; $r.state='InProgress'; Expect-Rejection { Assert-GateResponse $r $expected $config } }
 Test-Case 'Zero cases cannot pass' { $r=Copy-Result; $r.testCasesResults=@(); $r.totalTests=0; Expect-Rejection { Assert-GateResponse $r $expected $config } }
 Test-Case 'Allowlisted bridge URL is accepted' { Assert-PollUri ([uri]$config.bridgeUrl) $config }
-Test-Case 'Untrusted Location host is rejected' { Expect-Rejection { Assert-PollUri ([uri]'https://example.com/workflows/34339bc2bd8948e0b0a17f13c305fe3a/runs/123') $config } }
+Test-Case 'Untrusted Location host is rejected' { Expect-Rejection { Assert-PollUri ([uri]'https://example.com/workflows/33333333333333333333333333333333/runs/123') $config } }
 Test-Case 'Different workflow URL is rejected' {
     Expect-Rejection { Assert-PollUri ([uri]$config.bridgeUrl.Replace($config.bridgeWorkflowId,'unrelated')) $config }
 }

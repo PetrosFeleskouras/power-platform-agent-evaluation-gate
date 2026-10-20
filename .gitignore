@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+*.pfx
+*.pem
+*.key
+*.zip
+*.log
+node_modules/
+evaluation-gate/
+evaluation-gate-result/
+evaluation-gated-deployment-result/
+.mcs/

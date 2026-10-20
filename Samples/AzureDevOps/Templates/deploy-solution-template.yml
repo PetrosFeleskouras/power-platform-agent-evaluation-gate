@@ -1,0 +1,108 @@
+parameters:
+  - name: SolutionName
+    type: string
+    default: EnvironmentRetention
+
+  - name: OverwriteUnmanagedCustomisations
+    type: boolean
+    default: false
+  
+  - name: SkipLowerVersion
+    type: boolean
+    default: true
+
+steps:
+  # Install the Power Platform Tools on the agent
+  - task: PowerPlatformToolInstaller@2
+    name: installPowerPlatformTools
+    displayName: Install Power Platform Tools
+    inputs:
+      DefaultVersion: false
+      AddToolsToPath: true
+
+  # Pick up the connection details from the Service Connection for later use
+  - task: PowerPlatformSetConnectionVariables@2
+    inputs:
+      authenticationType: 'PowerPlatformSPN'
+      PowerPlatformSPN: '$(SPNServiceConnection)' 
+    name: setConnectionVariablesSP
+    displayName: Set Connection Variables for SP
+
+  # Check if the intended solution is already instead, and if so, what version    
+  - pwsh: "$(Pipeline.Workspace)/CI-Build/Scripts/IsSolutionInstalled.ps1 -serverURL '$(BuildTools.EnvironmentUrl)' -clientId '$(setConnectionVariablesSP.BuildTools.ApplicationId)' -clientSecret '$(setConnectionVariablesSP.BuildTools.ClientSecret)'  -solutionUniqueName '${{ parameters.SolutionName }}' -solutionFilePath '$(Pipeline.Workspace)/CI-Build/Solutions/${{ parameters.SolutionName }}_managed.zip'"
+    name: checkSolutionCurrentInstallationStatus
+    displayName: Check Solution Installation Status for Solution ${{ parameters.SolutionName }} 
+  
+  # Transform Deployment Settings file
+  - pwsh: "$(Pipeline.Workspace)/CI-Build/Scripts/TransformDeploymentSettingsFile.ps1 -settingsFilePath '$(Pipeline.Workspace)/CI-Build/Settings/${{ parameters.SolutionName }}.json' -environmentVariablesValues '$(EnvironmentVariableValues)' -connectionTokens '$(ConnectionReferenceTokens)' -environmentUrl '$(BuildTools.EnvironmentUrl)' -applicationId '$(setConnectionVariablesSP.BuildTools.ApplicationId)' -clientSecret '$(setConnectionVariablesSP.BuildTools.ClientSecret)' -tenantId '$(setConnectionVariablesSP.BuildTools.TenantId)'"
+    name: transformDeploymentSettingsFile
+    displayName: Transform Deployment Settings File for Solution ${{ parameters.SolutionName }}
+
+  # Import the solution as Stage and Upgrade
+  - task: PowerPlatformImportSolution@2
+    condition: and(succeeded(), and(eq(variables['ImportMode'], 'Modern Upgrade'), ne(variables['currentSolutionStatus'], 'NotInstalled')))
+    inputs:
+      authenticationType: 'PowerPlatformSPN'
+      PowerPlatformSPN: '$(SPNServiceConnection)'
+      SolutionInputFile: '$(Pipeline.Workspace)/CI-Build/Solutions/${{ parameters.SolutionName }}_managed.zip'
+      UseDeploymentSettingsFile: true
+      DeploymentSettingsFile: '$(Pipeline.Workspace)/CI-Build/Settings/${{ parameters.SolutionName }}.json'
+      AsyncOperation: true
+      MaxAsyncWaitTime: '60'
+      StageAndUpgrade: true
+      OverwriteUnmanagedCustomizations: ${{ parameters.OverwriteUnmanagedCustomisations }}
+      SkipLowerVersion: ${{ parameters.SkipLowerVersion }}
+      PublishWorkflows: true
+    name: importSolutionAsStageAndUpgrade
+    displayName: Import Solution ${{ parameters.SolutionName }} as Stage and Upgrade
+
+  # Import the solution as Holding Solution
+  - task: PowerPlatformImportSolution@2
+    condition: and(succeeded(), and(eq(variables['ImportMode'], 'Legacy Upgrade'), ne(variables['currentSolutionStatus'], 'NotInstalled')))
+    inputs:
+      authenticationType: 'PowerPlatformSPN'
+      PowerPlatformSPN: '$(SPNServiceConnection)'
+      SolutionInputFile: '$(Pipeline.Workspace)/CI-Build/Solutions/${{ parameters.SolutionName }}_managed.zip'
+      UseDeploymentSettingsFile: true
+      DeploymentSettingsFile: '$(Pipeline.Workspace)/CI-Build/Settings/${{ parameters.SolutionName }}.json'
+      AsyncOperation: true
+      MaxAsyncWaitTime: '60'
+      HoldingSolution: true
+      OverwriteUnmanagedCustomizations: ${{ parameters.OverwriteUnmanagedCustomisations }}
+      SkipLowerVersion: ${{ parameters.SkipLowerVersion }}
+      PublishWorkflows: true
+    name: importSolutionAsHoldingSolution
+    displayName: Import Solution ${{ parameters.SolutionName }} as Holding Solution
+
+    # Import the solution as Update
+  - task: PowerPlatformImportSolution@2
+    condition: and(succeeded(), or(eq(variables['ImportMode'], 'Update'), eq(variables['currentSolutionStatus'], 'NotInstalled')))
+    inputs:
+      authenticationType: 'PowerPlatformSPN'
+      PowerPlatformSPN: '$(SPNServiceConnection)'
+      SolutionInputFile: '$(Pipeline.Workspace)/CI-Build/Solutions/${{ parameters.SolutionName }}_managed.zip'
+      UseDeploymentSettingsFile: true
+      DeploymentSettingsFile: '$(Pipeline.Workspace)/CI-Build/Settings/${{ parameters.SolutionName }}.json'
+      AsyncOperation: true
+      MaxAsyncWaitTime: '60'
+      OverwriteUnmanagedCustomizations: ${{ parameters.OverwriteUnmanagedCustomisations }}
+      SkipLowerVersion: ${{ parameters.SkipLowerVersion }}
+      PublishWorkflows: true
+    name: importSolutionAsUpdate
+    displayName: Import Solution ${{ parameters.SolutionName }} as Update  
+    
+  # Check if the upgrade solution was installed, and if so, what version    
+  - pwsh: "$(Pipeline.Workspace)/CI-Build/Scripts/IsSolutionInstalled.ps1 -serverURL '$(BuildTools.EnvironmentUrl)' -clientId '$(setConnectionVariablesSP.BuildTools.ApplicationId)' -clientSecret '$(setConnectionVariablesSP.BuildTools.ClientSecret)'  -solutionUniqueName '${{ parameters.SolutionName }}' -solutionFilePath '$(Pipeline.Workspace)/CI-Build/Solutions/${{ parameters.SolutionName }}_managed.zip'"
+    name: checkSolutionImportOutcome
+    displayName: Check Import Outcome for Solution ${{ parameters.SolutionName }} 
+
+  # Apply upgrade if necessary
+  - task: PowerPlatformApplySolutionUpgrade@2
+    condition: and(succeeded(), and(eq(variables['ImportMode'], 'Legacy Upgrade'), ne(variables['currentUpgradeSolutionStatus'], 'NotInstalled')))
+    inputs:
+      authenticationType: 'PowerPlatformSPN'
+      PowerPlatformSPN: '$(SPNServiceConnection)'
+      SolutionName: ${{ parameters.SolutionName }}
+      MaxAsyncWaitTime: '60'
+    name: applySolutionUpgrade
+    displayName: Apply Upgrade for Solution ${{ parameters.SolutionName }} 

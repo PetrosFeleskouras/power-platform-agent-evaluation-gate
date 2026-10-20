@@ -1,0 +1,218 @@
+name: $(Build.DefinitionName) $(Rev:rrrr)
+
+trigger: none
+pr: none
+
+parameters:
+  - name: SolutionName
+    displayName: "Solution Unique Name"
+    type: string
+
+  - name: SolutionImportMode
+    displayName: "Solution Import Mode"
+    type: string
+    default: Modern Upgrade
+    values:
+    - Modern Upgrade
+    - Legacy Upgrade
+    - Update
+
+  - name: OverwriteUnmanagedCustomisations
+    displayName: "Overwrite Unmanaged Customisations"
+    type: boolean
+    default: false
+
+  - name: SkipLowerVersion
+    displayName: "Skip Lower Version"
+    type: boolean
+    default: true
+
+variables:
+  - group: Generic Variables
+  - name: ImportMode
+    value: ${{ parameters.SolutionImportMode }}
+
+resources:
+  pipelines:
+    - pipeline: 'CI-Build'
+      source: 'CI Build'
+      trigger: none
+
+stages:
+  - stage: evaluateAgent
+    displayName: Evaluate packaged agent
+    jobs:
+    - job: evaluateAgent
+      displayName: "Evaluate agent in ${{ parameters.SolutionName }}"
+      timeoutInMinutes: 60
+      pool:
+        vmImage: 'windows-latest'
+      steps:
+      - checkout: self
+        persistCredentials: false
+      - task: DownloadBuildArtifacts@1
+        displayName: Download Solutions from selected CI Build
+        inputs:
+          buildType: specific
+          project: $(resources.pipeline.CI-Build.projectID)
+          pipeline: $(resources.pipeline.CI-Build.pipelineID)
+          buildVersionToDownload: specific
+          buildId: $(resources.pipeline.CI-Build.runID)
+          downloadType: single
+          artifactName: Solutions
+          downloadPath: $(Pipeline.Workspace)/CI-Build
+      - task: PowerPlatformToolInstaller@2
+        displayName: Install Power Platform Tools
+        inputs:
+          DefaultVersion: true
+      - task: PowerPlatformSetConnectionVariables@2
+        name: devConnection
+        displayName: Set DEV connection variables
+        inputs:
+          authenticationType: PowerPlatformSPN
+          PowerPlatformSPN: $(SOURCE_SERVICE_CONNECTION)
+      - task: PowerShell@2
+        displayName: Resolve the packaged agent and Test case evaluation
+        inputs:
+          pwsh: true
+          targetType: filePath
+          filePath: AgentEvaluationsProject\Pipeline\Invoke-Gate.ps1
+          arguments: >-
+            -Action Snapshot
+            -OutputDirectory "$(Build.ArtifactStagingDirectory)\evaluation-gate"
+        env:
+          SOLUTION_UNIQUE_NAME: ${{ parameters.SolutionName }}
+          GATE_CLIENT_ID: $(devConnection.BuildTools.ApplicationId)
+          GATE_CLIENT_SECRET: $(devConnection.BuildTools.ClientSecret)
+          GATE_TENANT_ID: $(devConnection.BuildTools.TenantId)
+          GATE_ENVIRONMENT_URL: $(BuildTools.EnvironmentUrl)
+      - task: PowerShell@2
+        name: evaluate
+        displayName: Require all packaged evaluation cases to pass
+        inputs:
+          pwsh: true
+          targetType: filePath
+          filePath: AgentEvaluationsProject\Pipeline\Invoke-Gate.ps1
+          arguments: >-
+            -Action Evaluate
+            -OutputDirectory "$(Build.ArtifactStagingDirectory)\evaluation-gate"
+            -PackagePath "$(Pipeline.Workspace)\CI-Build\Solutions\${{ parameters.SolutionName }}_managed.zip"
+            -CorrelationId "$(resources.pipeline.CI-Build.runID)-$(Build.BuildId)-$(System.JobAttempt)"
+        env:
+          SOLUTION_UNIQUE_NAME: ${{ parameters.SolutionName }}
+          GATE_CLIENT_ID: $(devConnection.BuildTools.ApplicationId)
+          GATE_CLIENT_SECRET: $(devConnection.BuildTools.ClientSecret)
+          GATE_TENANT_ID: $(devConnection.BuildTools.TenantId)
+          GATE_ENVIRONMENT_URL: $(BuildTools.EnvironmentUrl)
+      - task: PublishPipelineArtifact@1
+        displayName: Publish evaluation result
+        condition: succeededOrFailed()
+        inputs:
+          targetPath: $(Build.ArtifactStagingDirectory)\evaluation-gate
+          artifact: evaluation-gate-result
+
+  - stage: deployToTEST
+    displayName: Deploy to TEST
+    dependsOn: evaluateAgent
+    condition: and(succeeded(), eq(dependencies.evaluateAgent.outputs['evaluateAgent.evaluate.gatePassed'], 'true'))
+    jobs:
+    - deployment: deployToTEST
+      variables:
+        - group: TEST Environment Variables
+      pool:
+        vmImage: 'windows-latest'
+      displayName: "Deploy ${{ parameters.SolutionName }} to TEST"
+      environment: 'TEST'
+      strategy:
+       runOnce:
+         deploy:
+          steps:
+          - checkout: self
+            persistCredentials: false
+          - task: DownloadBuildArtifacts@1
+            displayName: Download Scripts from selected CI Build
+            inputs:
+              buildType: specific
+              project: $(resources.pipeline.CI-Build.projectID)
+              pipeline: $(resources.pipeline.CI-Build.pipelineID)
+              buildVersionToDownload: specific
+              buildId: $(resources.pipeline.CI-Build.runID)
+              downloadType: single
+              artifactName: Scripts
+              downloadPath: $(Pipeline.Workspace)/CI-Build
+          - task: DownloadBuildArtifacts@1
+            displayName: Download Settings from selected CI Build
+            inputs:
+              buildType: specific
+              project: $(resources.pipeline.CI-Build.projectID)
+              pipeline: $(resources.pipeline.CI-Build.pipelineID)
+              buildVersionToDownload: specific
+              buildId: $(resources.pipeline.CI-Build.runID)
+              downloadType: single
+              artifactName: Settings
+              downloadPath: $(Pipeline.Workspace)/CI-Build
+          - task: DownloadBuildArtifacts@1
+            displayName: Download Solutions from selected CI Build
+            inputs:
+              buildType: specific
+              project: $(resources.pipeline.CI-Build.projectID)
+              pipeline: $(resources.pipeline.CI-Build.pipelineID)
+              buildVersionToDownload: specific
+              buildId: $(resources.pipeline.CI-Build.runID)
+              downloadType: single
+              artifactName: Solutions
+              downloadPath: $(Pipeline.Workspace)/CI-Build
+          - download: current
+            artifact: evaluation-gate-result
+          - task: PowerPlatformToolInstaller@2
+            displayName: Install Power Platform Tools for gate verification
+            inputs:
+              DefaultVersion: true
+          - task: PowerPlatformSetConnectionVariables@2
+            name: testConnection
+            displayName: Set TEST connection variables for gate verification
+            inputs:
+              authenticationType: PowerPlatformSPN
+              PowerPlatformSPN: $(TARGET_SERVICE_CONNECTION)
+          - task: PowerShell@2
+            displayName: Verify the selected artifact and passing evaluation
+            inputs:
+              pwsh: true
+              targetType: filePath
+              filePath: AgentEvaluationsProject\Pipeline\Invoke-Gate.ps1
+              arguments: >-
+                -Action BeforeImport
+                -OutputDirectory "$(Pipeline.Workspace)\evaluation-gate-result"
+                -PackagePath "$(Pipeline.Workspace)\CI-Build\Solutions\${{ parameters.SolutionName }}_managed.zip"
+            env:
+              SOLUTION_UNIQUE_NAME: ${{ parameters.SolutionName }}
+              GATE_CLIENT_ID: $(testConnection.BuildTools.ApplicationId)
+              GATE_CLIENT_SECRET: $(testConnection.BuildTools.ClientSecret)
+              GATE_TENANT_ID: $(testConnection.BuildTools.TenantId)
+              GATE_ENVIRONMENT_URL: $(BuildTools.EnvironmentUrl)
+          - template: ../Templates/deploy-solution-template.yml
+            parameters:
+              SolutionName: ${{ parameters.SolutionName }}
+              OverwriteUnmanagedCustomisations: ${{ parameters.OverwriteUnmanagedCustomisations }}
+              SkipLowerVersion: ${{ parameters.SkipLowerVersion }}
+          - task: PowerShell@2
+            displayName: Verify the imported agent and evaluation
+            inputs:
+              pwsh: true
+              targetType: filePath
+              filePath: AgentEvaluationsProject\Pipeline\Invoke-Gate.ps1
+              arguments: >-
+                -Action VerifyImport
+                -OutputDirectory "$(Pipeline.Workspace)\evaluation-gate-result"
+            env:
+              SOLUTION_UNIQUE_NAME: ${{ parameters.SolutionName }}
+              GATE_CLIENT_ID: $(testConnection.BuildTools.ApplicationId)
+              GATE_CLIENT_SECRET: $(testConnection.BuildTools.ClientSecret)
+              GATE_TENANT_ID: $(testConnection.BuildTools.TenantId)
+              GATE_ENVIRONMENT_URL: $(BuildTools.EnvironmentUrl)
+          - task: PublishPipelineArtifact@1
+            displayName: Publish deployment verification
+            condition: succeededOrFailed()
+            inputs:
+              targetPath: $(Pipeline.Workspace)\evaluation-gate-result
+              artifact: evaluation-gated-deployment-result

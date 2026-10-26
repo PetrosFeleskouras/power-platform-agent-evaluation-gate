@@ -1,0 +1,24 @@
+name: $(Build.DefinitionName) $(Rev:rrrr)
+trigger: none
+pr: none
+
+parameters:
+  - name: SolutionName
+    displayName: Solution Unique Name
+    type: string
+
+variables:
+  - group: Generic Variables
+  - group: DEV Environment Variables
+
+stages:
+  - stage: exportUnpackAndCommitSolution
+    displayName: Export selected solution to private source control
+    jobs:
+      - job: exportUnpackAndCommitSolution
+        pool:
+          vmImage: windows-latest
+        steps:
+          - template: ../Templates/commit-solution-template.yml
+            parameters:
+              SolutionName: ${{ parameters.SolutionName }}

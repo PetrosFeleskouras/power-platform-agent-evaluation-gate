@@ -1,0 +1,109 @@
+parameters:
+  - name: SolutionName
+    type: string
+
+steps:
+  - checkout: self
+    persistCredentials: true
+    fetchDepth: 0
+  - task: PowerShell@2
+    displayName: Require private Azure Repos and validate input
+    inputs:
+      pwsh: true
+      targetType: filePath
+      filePath: Samples\AzureDevOps\Scripts\Invoke-SourceCommit.ps1
+      arguments: -Action Validate
+    env:
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+      SOLUTION_NAME: ${{ parameters.SolutionName }}
+  - task: PowerPlatformToolInstaller@2
+    inputs:
+      DefaultVersion: true
+      AddToolsToPath: true
+  - task: PowerPlatformSetConnectionVariables@2
+    name: sourceConnection
+    inputs:
+      authenticationType: PowerPlatformSPN
+      PowerPlatformSPN: $(SPNServiceConnection)
+  - task: PowerShell@2
+    displayName: Calculate next source version
+    inputs:
+      pwsh: true
+      targetType: filePath
+      filePath: Samples\AzureDevOps\Scripts\SyncSolutionVersion.ps1
+    env:
+      SOLUTION_NAME: ${{ parameters.SolutionName }}
+      DEPLOYMENT_URL: $(BuildTools.EnvironmentUrl)
+      DEPLOYMENT_CLIENT_ID: $(sourceConnection.BuildTools.ApplicationId)
+      DEPLOYMENT_CLIENT_SECRET: $(sourceConnection.BuildTools.ClientSecret)
+  - task: PowerPlatformSetSolutionVersion@2
+    inputs:
+      authenticationType: PowerPlatformSPN
+      PowerPlatformSPN: $(SPNServiceConnection)
+      SolutionName: ${{ parameters.SolutionName }}
+      SolutionVersionNumber: $(newSolutionVersion)
+  - task: PowerPlatformPublishCustomizations@2
+    inputs:
+      authenticationType: PowerPlatformSPN
+      PowerPlatformSPN: $(SPNServiceConnection)
+      AsyncOperation: true
+      MaxAsyncWaitTime: 60
+  - task: PowerPlatformExportSolution@2
+    displayName: Export selected unmanaged solution
+    inputs:
+      authenticationType: PowerPlatformSPN
+      PowerPlatformSPN: $(SPNServiceConnection)
+      AsyncOperation: true
+      MaxAsyncWaitTime: 60
+      SolutionName: ${{ parameters.SolutionName }}
+      Managed: false
+      SolutionOutputFile: $(Build.ArtifactStagingDirectory)\${{ parameters.SolutionName }}.zip
+  - task: PowerPlatformExportSolution@2
+    displayName: Export selected managed solution
+    inputs:
+      authenticationType: PowerPlatformSPN
+      PowerPlatformSPN: $(SPNServiceConnection)
+      AsyncOperation: true
+      MaxAsyncWaitTime: 60
+      SolutionName: ${{ parameters.SolutionName }}
+      Managed: true
+      SolutionOutputFile: $(Build.ArtifactStagingDirectory)\${{ parameters.SolutionName }}_managed.zip
+  - task: PowerPlatformUnpackSolution@2
+    inputs:
+      SolutionInputFile: $(Build.ArtifactStagingDirectory)\${{ parameters.SolutionName }}.zip
+      SolutionTargetFolder: $(Build.SourcesDirectory)\Samples\AzureDevOps\Solutions\${{ parameters.SolutionName }}
+      SolutionType: Both
+      OverwriteFiles: true
+  - task: PowerShell@2
+    displayName: Generate deployment settings privately
+    inputs:
+      pwsh: true
+      targetType: inline
+      script: |
+        $ErrorActionPreference = 'Stop'
+        $settings = Join-Path $env:BUILD_SOURCESDIRECTORY "Samples\AzureDevOps\Settings\$env:SOLUTION_NAME.json"
+        $null = New-Item -ItemType Directory -Path (Split-Path $settings) -Force
+        pac solution create-settings --solution-zip (Join-Path $env:BUILD_ARTIFACTSTAGINGDIRECTORY "$env:SOLUTION_NAME.zip") --settings-file $settings *> $null
+        if ($LASTEXITCODE -ne 0) { throw 'Settings generation failed. Raw output was withheld.' }
+    env:
+      SOLUTION_NAME: ${{ parameters.SolutionName }}
+  - task: PowerShell@2
+    displayName: Tokenize environment-specific settings
+    inputs:
+      pwsh: true
+      targetType: filePath
+      filePath: Samples\AzureDevOps\Scripts\TokeniseDeploymentSettingsFile.ps1
+      arguments: -settingsFilePath "$(Build.SourcesDirectory)\Samples\AzureDevOps\Settings\${{ parameters.SolutionName }}.json"
+    env:
+      ENVIRONMENT_VARIABLE_TOKENS: $(EnvironmentVariableTokens)
+      CONNECTION_REFERENCE_TOKENS: $(ConnectionReferenceTokens)
+  - task: PowerShell@2
+    displayName: Privacy check and scoped automation commit
+    inputs:
+      pwsh: true
+      targetType: filePath
+      filePath: Samples\AzureDevOps\Scripts\Invoke-SourceCommit.ps1
+      arguments: -Action Commit
+    env:
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+      SOLUTION_NAME: ${{ parameters.SolutionName }}

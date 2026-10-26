@@ -1,0 +1,89 @@
+name: $(Build.DefinitionName) $(Rev:rrrr)
+trigger: none
+pr: none
+
+parameters:
+  - name: SolutionName
+    displayName: Solution Unique Name
+    type: string
+
+stages:
+  - stage: buildArtifacts
+    jobs:
+      - job: validatePrivateSource
+        pool:
+          vmImage: windows-latest
+        steps:
+          - checkout: self
+          - task: PowerShell@2
+            displayName: Verify private repository and selected source
+            inputs:
+              pwsh: true
+              targetType: inline
+              script: |
+                $ErrorActionPreference = 'Stop'
+                Import-Module .\Samples\AzureDevOps\Scripts\PublicationSafety.psm1 -Force
+                Assert-SolutionName $env:SOLUTION_NAME
+                Assert-PrivateRuntimeRepository
+                Assert-SourceFilesPrivacy $env:BUILD_SOURCESDIRECTORY $env:SOLUTION_NAME
+                $path = Join-Path $env:BUILD_SOURCESDIRECTORY "Samples\AzureDevOps\Solutions\$env:SOLUTION_NAME\Other\Solution.xml"
+                [xml]$manifest = Get-Content -LiteralPath $path -Raw
+                if ([string]$manifest.ImportExportXml.SolutionManifest.UniqueName -cne $env:SOLUTION_NAME) {
+                  throw 'Selected solution and manifest identity differ.'
+                }
+            env:
+              SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+              SOLUTION_NAME: ${{ parameters.SolutionName }}
+      - job: buildScripts
+        dependsOn: validatePrivateSource
+        pool:
+          vmImage: windows-latest
+        steps:
+          - checkout: self
+          - task: CopyFiles@2
+            inputs:
+              SourceFolder: $(Build.SourcesDirectory)/Samples/AzureDevOps/Scripts
+              Contents: |
+                *.ps1
+                *.psm1
+              TargetFolder: $(Build.ArtifactStagingDirectory)/Build/Scripts
+          - task: PublishBuildArtifacts@1
+            inputs:
+              PathtoPublish: $(Build.ArtifactStagingDirectory)/Build/Scripts
+              ArtifactName: Scripts
+              publishLocation: Container
+      - job: buildSettings
+        dependsOn: validatePrivateSource
+        pool:
+          vmImage: windows-latest
+        steps:
+          - checkout: self
+          - task: CopyFiles@2
+            inputs:
+              SourceFolder: $(Build.SourcesDirectory)/Samples/AzureDevOps/Settings
+              Contents: ${{ parameters.SolutionName }}.json
+              TargetFolder: $(Build.ArtifactStagingDirectory)/Build/Settings
+          - task: PublishBuildArtifacts@1
+            inputs:
+              PathtoPublish: $(Build.ArtifactStagingDirectory)/Build/Settings
+              ArtifactName: Settings
+              publishLocation: Container
+      - job: buildSolutions
+        dependsOn: validatePrivateSource
+        pool:
+          vmImage: windows-latest
+        steps:
+          - checkout: self
+          - task: PowerPlatformToolInstaller@2
+            inputs:
+              DefaultVersion: true
+          - task: PowerPlatformPackSolution@2
+            inputs:
+              SolutionType: Both
+              SolutionSourceFolder: $(Build.SourcesDirectory)/Samples/AzureDevOps/Solutions/${{ parameters.SolutionName }}
+              SolutionOutputFile: $(Build.ArtifactStagingDirectory)/Build/Solutions/${{ parameters.SolutionName }}.zip
+          - task: PublishBuildArtifacts@1
+            inputs:
+              PathtoPublish: $(Build.ArtifactStagingDirectory)/Build/Solutions
+              ArtifactName: Solutions
+              publishLocation: Container

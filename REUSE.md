@@ -1,11 +1,11 @@
-# Reuse and attribution status
+# Reuse and attribution
 
 ## Current status
 
-This repository is publicly viewable. **No repository-wide open-source licence
-or blanket redistribution permission has been established.** Do not interpret
-public visibility, a download link, an unmanaged solution, or an attribution
-notice as such a grant.
+**Reuse permissions are pending clarification.** This repository is publicly
+viewable, but a repository-wide open-source licence or blanket redistribution
+permission has not been established. Public visibility, downloads and attribution
+are not a licensing grant.
 
 This notice clarifies status; it does not grant, revoke or replace any rights
 that a copyright holder or applicable platform terms already provide.
@@ -20,7 +20,7 @@ privacy-oriented adaptations, documentation and a separately packaged bridge.
 Credits remain in the [README](README.md#origin-and-references). They are
 attribution, not evidence of a licensing grant.
 
-## What was checked
+## Licensing information
 
 During the October 2026 review:
 
@@ -31,8 +31,8 @@ During the October 2026 review:
   does not establish permissions.
 - GitHub did not identify a licence for this repository.
 
-Consequently, a blanket MIT, Apache or other licence has **not** been applied to
-material whose redistribution rights have not been verified.
+The repository therefore does not apply a blanket MIT, Apache or other licence
+to material whose redistribution rights have not been verified.
 
 ## Before redistribution or broader reuse
 
@@ -44,6 +44,5 @@ material whose redistribution rights have not been verified.
    confirmed. If different files have different terms, identify them explicitly.
 4. Preserve applicable attribution and notices in downstream copies.
 
-Until that is resolved, describe this repository as a **publicly viewable sample
-with reuse terms pending clarification**, not as freely licensed open-source
-software. This notice is not legal advice.
+Until permissions are established, this remains a publicly viewable sample with
+reuse terms pending clarification. This notice is not legal advice.

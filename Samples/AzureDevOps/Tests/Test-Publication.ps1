@@ -4,7 +4,6 @@ $repo=Split-Path (Split-Path (Split-Path $PSScriptRoot))
 $scripts=Join-Path (Split-Path $PSScriptRoot) 'Scripts'
 Import-Module (Join-Path $scripts 'PublicationSafety.psm1') -Force
 Import-Module (Join-Path $scripts 'DataverseConnection.psm1') -Force
-Import-Module (Join-Path $repo 'PowerAutomate\Bridge\BridgeTools.psm1') -Force
 $script:count=0
 function Check([string]$Name,[scriptblock]$Body) {
     & $Body
@@ -17,8 +16,6 @@ function Reject([scriptblock]$Body) {
     if(-not $failed){throw 'Invalid input was accepted.'}
 }
 function Assert([bool]$Value,[string]$Message) { if(-not $Value){throw $Message} }
-$environment='22222222-2222-2222-2222-222222222222'
-$caller='44444444-4444-4444-4444-444444444444'
 
 Check 'Valid solution name' { Assert-SolutionName 'ExampleSolution' }
 Check 'Reject path traversal in solution name' { Reject { Assert-SolutionName '..\other' } }
@@ -136,62 +133,73 @@ try {
     }
 } finally { Remove-Item -LiteralPath $temp -Recurse -Force }
 
-$params=@{EnvironmentId=$environment;CallerObjectId=$caller;ConnectionName='shared-microsoftcopi-synthetic';Name='Synthetic bridge'}
-$request=New-BridgeRequest @params
-Check 'Bridge is stopped and has an explicit caller restriction' {
-    Assert ($request.properties.state-eq'Stopped') 'Flow is enabled by default.'
-    Assert ($request.properties.definition.triggers.manual.inputs.triggerAuthenticationType-eq'User') 'Authentication weakened.'
-    Assert ($request.properties.definition.triggers.manual.inputs.triggerAllowedUsers-eq$caller) 'Caller binding absent.'
+$flowFiles=@(Get-ChildItem -LiteralPath (Join-Path $repo 'PowerAutomate\Solution\src\Workflows') -Filter '*.json' -File)
+Assert ($flowFiles.Count-eq 1) 'Expected exactly one solution flow definition.'
+$json=Get-Content -LiteralPath $flowFiles[0].FullName -Raw
+$flow=$json|ConvertFrom-Json -AsHashtable
+$d=$flow.properties.definition
+[xml]$flowMetadata=Get-Content -LiteralPath ($flowFiles[0].FullName+'.data.xml') -Raw
+Check 'Solution flow is off and has an environment-variable-backed caller restriction' {
+    Assert ([string]$flowMetadata.Workflow.StateCode-ceq'0') 'Flow is enabled by default.'
+    Assert ($d.triggers.manual.inputs.triggerAuthenticationType-ceq'User') 'Authentication weakened.'
+    Assert ($d.triggers.manual.inputs.triggerAllowedUsers-ceq"@parameters('Bridge Allowed Caller Object ID (aeg_AllowedCallerObjectId)')") 'Caller binding absent.'
 }
-Check 'Bridge explicitly binds source environment before discovery' {
-    $d=$request.properties.definition
-    Assert ($d.actions.Validate_environment.inputs.schema.properties.sourceEnvironmentId.enum[0]-eq$environment) 'Source environment is not pinned.'
+Check 'Solution flow checks the configured source environment before discovery' {
+    Assert ($d.actions.Validate_environment.inputs.content.matches-ceq"@equals(triggerBody()?['sourceEnvironmentId'],parameters('Bridge Source Environment ID (aeg_SourceEnvironmentId)'))") 'Source environment comparison is missing.'
     Assert ($d.actions.Validate_environment.inputs.content -is [System.Collections.IDictionary]) 'ParseJson content must be an object, not an unquoted GUID string.'
     Assert ($d.actions.Initialize_result.runAfter.Validate_environment[0]-eq'Succeeded') 'Validation can be bypassed.'
 }
-Check 'Bridge binds connector and evaluation profile consistently' {
-    Assert ($request.properties.connectionReferences.shared_microsoftcopilotstudio.connectionName-eq$params.ConnectionName) 'Connector reference mismatch.'
-    Assert ($request.properties.definition.actions.Evaluate_and_wait.actions.Start_evaluation.inputs.parameters.body.mcsConnectionId-eq$params.ConnectionName) 'Profile mismatch.'
+Check 'Solution flow uses a portable connector reference and evaluation-profile parameter' {
+    $ref=$flow.properties.connectionReferences.shared_microsoftcopilotstudio
+    Assert ($ref.connection.connectionReferenceLogicalName-ceq'aeg_CopilotStudio'-and$ref.runtimeSource-ceq'embedded') 'Connector reference mismatch.'
+    Assert ($d.actions.Evaluate_and_wait.actions.Start_evaluation.inputs.parameters.body.mcsConnectionId-ceq"@parameters('Bridge Evaluation Connection Name (aeg_EvaluationConnectionName)')") 'Profile parameter mismatch.'
 }
-Check 'Missing or empty caller identity rejected' {
-    $p=$params.Clone();$p.CallerObjectId=[guid]::Empty.ToString();Reject {New-BridgeRequest @p}
+Check 'Caller parameter has a safe default and a configuration guard' {
+    $caller=$d.parameters['Bridge Allowed Caller Object ID (aeg_AllowedCallerObjectId)']
+    Assert ($caller.defaultValue-ceq'00000000-0000-0000-0000-000000000000'-and$caller.metadata.schemaName-ceq'aeg_AllowedCallerObjectId') 'Caller parameter is not portable.'
+    Assert ($d.actions.Validate_configuration.inputs.content.ready.Contains("not(equals(parameters('Bridge Allowed Caller Object ID (aeg_AllowedCallerObjectId)'),'00000000-0000-0000-0000-000000000000'))")) 'Unconfigured caller is not guarded.'
 }
-Check 'Invalid connector binding rejected' {
-    $p=$params.Clone();$p.ConnectionName='__CONNECTION_NAME__';Reject {New-BridgeRequest @p}
+Check 'Evaluation profile requires a configured connection name' {
+    Assert ($d.parameters['Bridge Evaluation Connection Name (aeg_EvaluationConnectionName)'].defaultValue-ceq'CONFIGURE_CONNECTION_NAME') 'Expected unconfigured profile default.'
+    Assert ($d.actions.Validate_configuration.inputs.content.ready.Contains("startsWith(parameters('Bridge Evaluation Connection Name (aeg_EvaluationConnectionName)'),'shared-microsoftcopi-')")) 'Connection-name guard is missing.'
 }
 Check 'Bridge preserves asynchronous responses and contract version' {
-    $d=$request.properties.definition
     Assert ($d.actions.Evaluation_response.operationOptions-eq'Asynchronous'-and$d.actions.Error_response.operationOptions-eq'Asynchronous') 'Asynchronous response missing.'
     Assert ($d.actions.Evaluation_response.inputs.body.schemaVersion-eq 2) 'Contract version changed.'
 }
 Check 'Bridge preserves bounded polling and no start retry' {
-    $a=$request.properties.definition.actions.Evaluate_and_wait.actions
+    $a=$d.actions.Evaluate_and_wait.actions
     Assert ($a.Wait_for_evaluation.limit.timeout-eq'PT20M'-and$a.Wait_for_evaluation.limit.count-eq 80) 'Unbounded polling.'
     Assert ($a.Wait_for_evaluation.operationOptions-eq'FailWhenLimitsReached') 'Polling must fail explicitly on exhausted limits.'
     Assert ($a.Start_evaluation.inputs.retryPolicy.type-eq'none') 'Evaluation starts can be retried.'
 }
 Check 'Bridge requires exactly one matching active evaluation' {
-    $d=$request.properties.definition
     $schema=$d.actions.Resolve_evaluation.actions.Validate_match.inputs.schema
     Assert ($schema.minItems-eq 1-and$schema.maxItems-eq 1) 'Ambiguous evaluations could be selected.'
     Assert ($d.actions.Resolve_evaluation.actions.For_each_agent.actions.Filter_named_sets.inputs.where.Contains("'Active'")) 'Inactive evaluations accepted.'
 }
 Check 'Bridge connector payloads have secure inputs and outputs' {
-    $start=$request.properties.definition.actions.Evaluate_and_wait.actions.Start_evaluation
+    $start=$d.actions.Evaluate_and_wait.actions.Start_evaluation
     Assert (($start.runtimeConfiguration.secureData.properties-join',')-eq'inputs,outputs') 'Connector payload history is unprotected.'
 }
-Check 'Stopped readback matches all supplied bindings' {
-    Assert-BridgeReadback $request $environment $caller $params.ConnectionName
+Check 'Configuration validation runs before environment validation' {
+    Assert ($d.actions.Validate_environment.runAfter.Validate_configuration[0]-ceq'Succeeded') 'Configuration guard can be bypassed.'
+    Assert ($d.actions.Validate_configuration.inputs.schema.properties.ready.enum[0]-eq$true) 'Configuration guard must require true.'
 }
-Check 'Readback rejects wrong environment or connector' {
-    Reject {Assert-BridgeReadback $request $caller $caller $params.ConnectionName}
-    Reject {Assert-BridgeReadback $request $environment $caller 'shared-microsoftcopi-other'}
+Check 'Source environment parameter is portable and its guard schema is static' {
+    $source=$d.parameters['Bridge Source Environment ID (aeg_SourceEnvironmentId)']
+    Assert ($source.defaultValue-ceq'00000000-0000-0000-0000-000000000000'-and$source.metadata.schemaName-ceq'aeg_SourceEnvironmentId') 'Source environment default is not portable.'
+    Assert ($d.actions.Validate_environment.inputs.schema.properties.matches.enum[0]-eq$true) 'Environment guard must require true.'
+    foreach($name in @('Validate_configuration','Validate_environment')){
+        $schemaText=$d.actions[$name].inputs.schema|ConvertTo-Json -Depth 15
+        Assert ($schemaText-notmatch'@|"pattern"|"patternProperties"') 'Guard schema contains unsupported expressions or patterns.'
+    }
 }
-Check 'Public bridge template contains placeholders rather than instance IDs' {
-    $json=Get-Content -LiteralPath (Join-Path $repo 'PowerAutomate\Bridge\definition.template.json') -Raw
-    Assert ($json-notmatch'(?i)[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}') 'Instance GUID in template.'
-    Assert ($json-notmatch'"operationMetadataId"|"authentication"') 'Instance authentication/metadata survived sanitization.'
-    Assert ($json.Contains('__CALLER_OBJECT_ID__')-and$json.Contains('__CONNECTION_NAME__')) 'Expected deployment placeholders.'
+Check 'Solution definition contains no connection instance or nonzero GUID literal' {
+    Assert ($flow.properties.connectionReferences.shared_microsoftcopilotstudio.connection.Keys.Count-eq 1) 'Unexpected connection instance binding.'
+    foreach($id in [regex]::Matches($json,'(?i)[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}')){
+        Assert ($id.Value-ceq'00000000-0000-0000-0000-000000000000') 'Instance GUID in flow definition.'
+    }
 }
 Check 'New commit template has no requester identity or broad forced staging' {
     $text=Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot) 'Templates\commit-solution-template.yml') -Raw

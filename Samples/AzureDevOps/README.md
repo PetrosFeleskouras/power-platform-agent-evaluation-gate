@@ -1,7 +1,9 @@
-# New producer and private-runtime deployment copies
+# Azure DevOps pipeline setup
 
-These files are additions. They do not change existing cloud pipeline definitions
-or the original deployment YAML/template already in the repository.
+Configure Commit Solution, CI Build and evaluation-gated deployment in your
+private Azure DevOps project. Install the
+[Power Automate bridge solution](../../PowerAutomate/Solution/README.md) in the
+source environment before running the deployment pipeline.
 
 ## Repository and tools
 
@@ -13,21 +15,31 @@ or the original deployment YAML/template already in the repository.
 - Use Microsoft-hosted Windows agents with PowerShell 7 and the Power Platform
   Build Tools extension. The version/install helpers use
   `Rnwood.Dataverse.Data.PowerShell` version `1.1.3`.
-- Only the main-branch path is supported by these copies. Hotfix/other branch
+- Only the main-branch path is supported. Hotfix/other branch
   workflows need their own explicit versioning and repository checks.
 - Commits use `ALM Automation <alm-automation@example.invalid>` and a fixed
   message. No requesting user's display name, email or arbitrary message is used.
 
-## New pipeline definitions
+## Create the pipeline definitions
+
+In Azure DevOps, select **Pipelines > New pipeline > Azure Repos Git**, choose
+your private repository, and use **Existing Azure Pipelines YAML file**.
+Repeat for each entry below.
 
 | Display name | YAML |
 | --- | --- |
 | Commit Solution | [PipelineDefinitions/commit-solution-changes.yml](PipelineDefinitions/commit-solution-changes.yml) |
 | CI Build | [PipelineDefinitions/ci-build.yml](PipelineDefinitions/ci-build.yml) |
-| Deploy Solution with Agent Evaluation - Private Copy | [PipelineDefinitions/deploy-solution-with-agent-evaluation-private.yml](PipelineDefinitions/deploy-solution-with-agent-evaluation-private.yml) |
+| Deploy Solution with Agent Evaluation | [PipelineDefinitions/deploy-solution-with-agent-evaluation-private.yml](PipelineDefinitions/deploy-solution-with-agent-evaluation-private.yml) |
 
-All are manual (`trigger: none`, `pr: none`). Configure new definitions rather
-than repointing an existing verified pipeline during evaluation of these samples.
+Keep **CI Build** as the producer's display name; the deployment pipeline resource
+references it. Authorize each definition to use its repository, variable groups,
+service connections and environment resources.
+
+All three are manual (`trigger: none`, `pr: none`). Set up separate definitions
+while validating the sample, rather than replacing a working release process.
+
+## What each pipeline does
 
 Commit Solution requires only `SolutionName`. It validates the private checkout
 first, increments the source version, publishes customizations, exports both
@@ -40,12 +52,12 @@ the three artifact jobs run:
 
 - `Solutions`: only the selected managed and unmanaged ZIPs.
 - `Settings`: only the selected solution's tokenized JSON.
-- `Scripts`: the new `.ps1` **and `.psm1`** helper bundle; keep module dependencies.
+- `Scripts`: the `.ps1` **and `.psm1`** helper bundle; keep module dependencies.
 
-Deployment uses the same artifact names/resource selection as the original gate.
-Its new import-template copy supplies script credentials/configuration through
-environment variables. It still supports the original managed update/upgrade
-options. Upgrades can remove omitted components; select the intended import mode.
+Deployment selects one CI run and uses its artifacts throughout the release.
+Its import template supplies script credentials/configuration through environment
+variables and supports managed update/upgrade options. Upgrades can remove omitted
+components; select the intended import mode.
 
 ## Variable groups
 
@@ -85,21 +97,44 @@ Synthetic shapes (values below are not usable deployment bindings):
 
 Use `ConnectionReferenceTokens` as the actual variable name in each group;
 `DEV_`/`TEST_` above only distinguish the shapes. **Target connections must be
-explicitly mapped.** Unlike the original helper, this copy does not choose the
-first connection returned by a connector query. Missing/duplicate mappings fail.
+explicitly mapped.** Each token must resolve to exactly one target connection.
+Missing or duplicate mappings fail.
 The transformation operates on a downloaded settings working copy, not the ZIP.
 
-Configure the existing deployment variables as described in the
-[original gate README](../../README.md#4-one-time-pipeline-configuration):
-`SOURCE_ENVIRONMENT_URL`, `SOURCE_ENVIRONMENT_ID`, `SOURCE_TENANT_ID`,
-`SOURCE_SERVICE_CONNECTION`, `TARGET_ENVIRONMENT_URL`, `TARGET_ENVIRONMENT_ID`,
-`TARGET_TENANT_ID`, `TARGET_SERVICE_CONNECTION`, `EVALUATION_BRIDGE_URL` and
-`EVALUATION_BRIDGE_WORKFLOW_ID`.
+## Deployment variables
+
+Set these variables on **Deploy Solution with Agent Evaluation**. Store credential
+values in Azure DevOps service connections rather than repository files.
+
+| Variable | Value |
+| --- | --- |
+| `SOURCE_ENVIRONMENT_URL` | DEV Dataverse root HTTPS URL |
+| `SOURCE_ENVIRONMENT_ID` | DEV Power Platform environment GUID |
+| `SOURCE_TENANT_ID` | DEV tenant GUID |
+| `SOURCE_SERVICE_CONNECTION` | Source Power Platform service connection name |
+| `TARGET_ENVIRONMENT_URL` | TEST Dataverse root HTTPS URL |
+| `TARGET_ENVIRONMENT_ID` | TEST Power Platform environment GUID |
+| `TARGET_TENANT_ID` | TEST tenant GUID |
+| `TARGET_SERVICE_CONNECTION` | Target Power Platform service connection name |
+| `EVALUATION_BRIDGE_URL` | The enabled bridge's authenticated HTTP trigger URL |
+| `EVALUATION_BRIDGE_WORKFLOW_ID` | The 32-character workflow ID in the trigger URL |
 
 Use the same target connection for `TARGET_SERVICE_CONNECTION` and the TEST
 group's `SPNServiceConnection`. Authorize the `TEST` Azure DevOps environment
 and preserve required approvals. Configure the bridge as described in
 [unmanaged solution setup](../../PowerAutomate/Solution/README.md).
+
+## Run a release
+
+1. Run Commit Solution with the selected `SolutionName`.
+2. After it succeeds, run CI Build for the same solution and its source commit.
+3. Run Deploy Solution with Agent Evaluation using that solution name and select
+   the corresponding CI Build resource version.
+4. Review the evaluation artifacts and TEST outcome.
+
+The application solution must contain one agent, one packaged evaluation set,
+its test cases and required skills. Keep the source stable during the release.
+For another solution, repeat the sequence with a separate CI run.
 
 ## Privacy checks and limits
 
@@ -129,11 +164,13 @@ pwsh -NoProfile -File .\Samples\AzureDevOps\Tests\Test-Publication.ps1
 pwsh -NoProfile -File .\AgentEvaluationsProject\Pipeline\Test-Gate.ps1
 ```
 
-Before publishing new sample content, stage only reviewed additions and run:
+For a source-only review of newly added sample files, stage those additions and run:
 
 ```powershell
 pwsh -NoProfile -File .\Samples\AzureDevOps\Tests\Test-PublicationContent.ps1 -BaseRef origin/main
 ```
 
-That final command checks the proposed added files, not private operational
-exports. Review every new commit and release asset before a public push.
+That check is intentionally limited to added text files. It rejects modifications
+and ZIPs and is not a general release validator. Inspect solution ZIPs with
+[Test-SolutionPackage.ps1](../../PowerAutomate/Solution/Test-SolutionPackage.ps1).
+Review all proposed changes, commit metadata and release assets before a public push.

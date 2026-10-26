@@ -1,8 +1,8 @@
-# Install the unmanaged Agent Evaluation Gate Bridge solution
+# Install and enable the evaluation bridge
 
-**Recommended installation:** import this solution through Power Apps or
-Power Automate. Azure CLI and the earlier PowerShell flow installer are not
-required for normal installation.
+Import the unmanaged solution through the standard Power Apps or Power Automate
+Solutions interface, configure your connection and environment variables, then
+enable the flow.
 
 ## Download
 
@@ -19,7 +19,7 @@ required for normal installation.
 | Publisher | Agent Evaluation Gate Samples (`aeg`) |
 | SHA-256 | `5744FD2E8E80849BC28CD87E6140921EA3F93868AF8F9D7BD455924C2CD81114` |
 
-This ZIP contains one new flow, one connection reference and three environment
+This ZIP contains one flow, one connection reference and three environment
 variable definitions. It contains no agents or evaluation datasets. The flow is
 exported **Off** with safe, unconfigured defaults and no current variable values.
 
@@ -103,11 +103,6 @@ invoking an evaluation. Keep actual values in your environment, not GitHub.
 6. If you change environment-variable values later, save/refresh the flow and
    turn it off/on as appropriate so the runtime uses the new configuration.
 
-The new solution flow was successfully enabled with configured environment
-variables during validation and then returned to Off. An anonymous call returned
-HTTP 401, and a request from the configured caller with a mismatched source
-environment returned a blocking response before native evaluation.
-
 Do not weaken trigger authentication to work around an enablement/authentication
 error. Verify the connection, variable values, caller object ID, tenant and license.
 
@@ -117,14 +112,14 @@ In your **private runtime Azure DevOps project**, set:
 
 | Variable | Value |
 | --- | --- |
-| `EVALUATION_BRIDGE_URL` | The new flow's HTTP POST URL |
+| `EVALUATION_BRIDGE_URL` | The flow's HTTP POST URL |
 | `EVALUATION_BRIDGE_WORKFLOW_ID` | The 32-character workflow ID in that URL's `/workflows/<id>/` segment |
 
 The workflow ID in the trigger URL can differ from the solution component ID or
 portal flow ID. Use the URL's ID for polling validation.
 
-Also configure the existing `SOURCE_*` and `TARGET_*` variables and service
-connections from the [pipeline setup guide](../../Samples/AzureDevOps/README.md).
+Also configure the `SOURCE_*` and `TARGET_*` variables and service
+connections from the [pipeline setup guide](../../Samples/AzureDevOps/README.md#deployment-variables).
 The source service principal must be the caller allowed by the bridge.
 
 Keep callback URLs and connection/service-principal values in protected runtime
@@ -147,14 +142,14 @@ and synthetic configuration shapes.
      `Samples/AzureDevOps/PipelineDefinitions/commit-solution-changes.yml`
    - **CI Build**:
      `Samples/AzureDevOps/PipelineDefinitions/ci-build.yml`
-   - **Deploy Solution with Agent Evaluation - Private Copy**:
+   - **Deploy Solution with Agent Evaluation**:
      `Samples/AzureDevOps/PipelineDefinitions/deploy-solution-with-agent-evaluation-private.yml`
 6. Authorize their repository, variable-group, service-connection, environment and
    pipeline-resource access. Enable the definitions for manual queuing; these
    samples intentionally use `trigger: none` and `pr: none`.
 7. For each source solution, run **Commit Solution**, wait for success, then run
    **CI Build** for the same `SolutionName` and resulting source commit.
-8. Manually run the new deployment definition with that `SolutionName` and
+8. Manually run the deployment definition with that `SolutionName` and
    select the corresponding successful **CI Build** resource version.
 9. Review `evaluation-gate-result`. A complete pass allows the exact managed ZIP
    into TEST; other outcomes retain evidence and skip the import.
@@ -163,7 +158,7 @@ The agent solution must contain one agent, one packaged evaluation set, its
 cases and required skills. Those application components are supplied by the user;
 this bridge solution is installed separately from the application being gated.
 
-## Privacy and validation
+## Package contents and privacy
 
 Every ZIP entry was inspected before publication. Publisher contact fields are
 empty; there are no source-environment IDs, real caller IDs, connection instances,
@@ -173,15 +168,10 @@ The package includes a stable **flow component GUID** so Dataverse can identify
 the component across imports. That technical component identity is intentional;
 it is not a person, credential or environment binding.
 
-The exact published ZIP was imported into a second environment and verified to
-contain an unmanaged solution, an Off flow, an unbound connection reference,
-three definitions and no current values. Enablement was validated on the
-separate source copy with private configuration. The second environment had no
-Copilot Studio connection, so enablement there was not claimed.
-
-No existing demo agents, solutions, pipelines, flows or connections were edited.
-No native agent evaluation or TEST application deployment was started for this
-packaging task.
+See [Tests and validation](../../VALIDATION.md#unmanaged-solution) for the verified
+import, enablement and authentication checks, including their scope and limitations.
+Keep runtime flow history and pipeline evidence private because evaluation
+responses may contain sensitive information.
 
 ## Verify or rebuild
 
@@ -199,8 +189,8 @@ pac solution pack --folder .\PowerAutomate\Solution\src `
 ```
 
 A rebuild may have a different ZIP hash because of packaging metadata; compare
-the extracted entries and run the package test before using it. Importing through
-the portal requires neither these commands nor the earlier custom flow installer.
+the extracted entries and run the package test before using it. These commands
+are for maintainers; users can import the released ZIP directly through the portal.
 
 Official guidance:
 

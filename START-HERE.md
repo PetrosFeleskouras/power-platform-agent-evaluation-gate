@@ -1,98 +1,94 @@
-# Complete pipeline and bridge samples
+# Start here
 
-These are **separate publication copies** of the producer pipelines and evaluation
-bridge. Existing deployed Power Platform and Azure DevOps assets remain intact.
-The recommended bridge installation is now a standard **unmanaged solution import**.
+Set up a release path that evaluates an agent in DEV before importing its managed
+solution into TEST.
 
-**[Download and install the unmanaged bridge solution](PowerAutomate/Solution/README.md).**
+## Before you begin
 
-## What is included
+You need:
 
-| Component | Entry point |
+- A private Azure DevOps project and Azure Repos repository.
+- DEV and TEST Dataverse environments with suitable Power Platform permissions.
+- Power Platform Build Tools installed in Azure DevOps.
+- Power Automate Premium entitlement for the bridge's HTTP trigger.
+- A Copilot Studio agent solution containing an evaluation set and its test cases.
+- Permission to configure service connections, variable groups and the TEST
+  Azure DevOps environment.
+
+Review the [reuse terms](REUSE.md) before adapting or redistributing the sample.
+
+## 1. Prepare your runtime repository
+
+Place the sample code in a **private Azure Repos repository** on `main`, preserving
+the directory structure. Commit Solution and CI Build check repository visibility
+before exporting or building.
+
+Keep agent exports, generated settings, connection values and evaluation evidence
+in private infrastructure. The public repository is a source distribution, not
+the destination for operational exports.
+
+## 2. Import and enable the bridge
+
+Follow the [solution installation guide](PowerAutomate/Solution/README.md):
+
+1. Download the unmanaged solution ZIP.
+2. Import it into the source environment through **Solutions > Import solution**.
+3. Bind the Copilot Studio connection reference.
+4. Set the current values for allowed caller, source environment and evaluation
+   connection name.
+5. Review the caller restriction, then turn on the flow.
+
+The flow is delivered Off with unconfigured defaults. Save its trigger URL and
+the workflow ID from that URL for the deployment pipeline.
+
+## 3. Configure Azure DevOps
+
+Use the [pipeline setup guide](Samples/AzureDevOps/README.md) to configure:
+
+- DEV and TEST service connections.
+- `Generic Variables`, `DEV Environment Variables` and `TEST Environment Variables`.
+- The deployment pipeline's source, target and bridge variables.
+- Repository permissions, resource authorization and any TEST approval checks.
+
+Create these pipeline definitions:
+
+| Name | YAML |
 | --- | --- |
-| Commit Solution copy | [commit-solution-changes.yml](Samples/AzureDevOps/PipelineDefinitions/commit-solution-changes.yml) |
-| CI Build copy | [ci-build.yml](Samples/AzureDevOps/PipelineDefinitions/ci-build.yml) |
-| Evaluation-gated deployment copy with private credential passing | [deploy-solution-with-agent-evaluation-private.yml](Samples/AzureDevOps/PipelineDefinitions/deploy-solution-with-agent-evaluation-private.yml) |
-| Producer configuration and script dependencies | [Azure DevOps setup](Samples/AzureDevOps/README.md) |
-| Unmanaged Power Automate bridge solution and portal setup | [Solution setup](PowerAutomate/Solution/README.md) |
-| Earlier advanced source-based bridge option | [Source installer](PowerAutomate/Bridge/README.md) |
-| Verification scope and privacy limitations | [Validation record](VALIDATION.md) |
+| Commit Solution | [commit-solution-changes.yml](Samples/AzureDevOps/PipelineDefinitions/commit-solution-changes.yml) |
+| CI Build | [ci-build.yml](Samples/AzureDevOps/PipelineDefinitions/ci-build.yml) |
+| Deploy Solution with Agent Evaluation | [deploy-solution-with-agent-evaluation-private.yml](Samples/AzureDevOps/PipelineDefinitions/deploy-solution-with-agent-evaluation-private.yml) |
 
-```text
-Public GitHub sample
-       | copy code into your private Azure Repos project
-       v
-Commit Solution -> CI Build -> Evaluation-gated deployment
-                                      |
-                            Your own bridge instance
-                                      |
-                            Native evaluation in DEV
-                                      |
-                         Complete pass -> import to TEST
-```
+Use **CI Build** as the producer's name because the deployment resource references
+it. All three pipelines are manually queued.
 
-**Use private infrastructure for operational data.** Do not run Commit Solution
-against this public repository. Exported agents, knowledge, test cases, generated
-settings and evaluation results can contain private information.
+## 4. Run one release
 
-The two new producer definitions require private Azure Repos on `main` before
-export/build. The new deployment copy passes credential values through environment
-variables instead of embedding them in script command text. It retains the
-original gate and import policy. Use the new copy with the new helper bundle;
-the existing deployed pipelines and their scripts are not changed by this repo.
+1. Run **Commit Solution** with your `SolutionName`. It increments the version,
+   publishes source customizations and exports the solution into private Git.
+2. Wait for success, then run **CI Build** for that solution and its resulting
+   source commit.
+3. Run **Deploy Solution with Agent Evaluation** with the same solution name.
+   Select the successful CI resource version from step 2.
+4. Review the evaluation result and deployment outcome.
 
-## Quick start
+For a second solution, repeat the complete sequence with a separate CI build.
+Keep the source agent and evaluation stable throughout each release.
 
-1. Copy the sample repository into a **private Azure Repos repository**.
-2. Install Power Platform Build Tools and configure DEV/TEST service connections
-   and variable groups using the [producer guide](Samples/AzureDevOps/README.md).
-3. Import the [unmanaged bridge solution](PowerAutomate/Solution/README.md) into
-   your source environment through **Solutions > Import solution**. Bind the
-   connection reference, configure its three current environment-variable values,
-   then enable the new flow after reviewing caller restrictions.
-4. Configure the deployment pipeline's existing source/target and bridge variables.
-5. Create new Azure DevOps definitions for the three YAML entry points above.
-   Name the CI producer **CI Build**, matching the deployment pipeline resource.
-6. Run Commit Solution for one reviewed source solution. This increments its
-   version, publishes source customizations and exports it to private Git.
-7. Run CI Build for the same `SolutionName` and the new source commit.
-8. Run the new deployment copy with that `SolutionName` and select its CI build.
-   Only a complete passing evaluation authorizes the exact managed CI package.
+## 5. Inspect the evidence
 
-Use the unmanaged ZIP in **Solutions > Import solution**, not the legacy
-**My flows > Import package** page. The package has been imported and verified in
-a second environment. The earlier source installer remains an optional advanced
-alternative; it is not needed for the recommended solution installation.
-Setup values and generated callback URLs stay in private runtime configuration.
+Download `evaluation-gate-result` from the deployment run Summary. A successful
+import also publishes `evaluation-gated-deployment-result`.
 
-## Privacy and provenance
+The gate requires all cases and metrics to pass, the returned evaluation
+identities to match the packaged tests, and the package hash to remain unchanged.
+Other outcomes skip TEST and retain diagnostic evidence.
 
-New sample files contain synthetic bindings only. The repository's already
-published account identity, Git attribution and workshop credits remain intact;
-this is not an anonymous repository. No source tenant bindings, real evaluation
-transcripts, flow run links or operational export packages are added here.
-
-The producer/import pattern originates from the Advanced ALM for Power Platform
-workshop credited in the [original README](README.md#origin-and-references).
-The scripts/templates here are separate adaptations for private-runtime use.
-No new license is assigned to inherited material.
-See [REUSE.md](REUSE.md) for the current permissions status and provenance checks.
-
-Automated privacy checks catch specified patterns and reject unsupported binary
-source; they cannot certify arbitrary natural-language content as PII-free.
-Review your solution content and keep runtime repositories, logs and artifacts
-private, even when a scan passes.
-
-## Updating the gate after the repository review
+## Maintenance
 
 Update [Gate.psm1](AgentEvaluationsProject/Pipeline/Gate.psm1) and
-[Invoke-Gate.ps1](AgentEvaluationsProject/Pipeline/Invoke-Gate.ps1) together in
-your private runtime repository. Both evaluation-time and pre-import validation
-now require the packaged test-set identity, exact case-ID set and exact agent
-inventory. The bridge HTTP request/response contract remains version 2.
+[Invoke-Gate.ps1](AgentEvaluationsProject/Pipeline/Invoke-Gate.ps1) together.
+Use current pipeline source from `main`; a bridge release's automatic source-code
+archive may predate later pipeline fixes. The bridge HTTP contract is version 2.
 
-The unmanaged bridge ZIP is unchanged; these corrections are pipeline-side.
-Use the current pipeline source from `main` rather than assuming a historical
-bridge release's automatic source-code archive includes later gate fixes.
-Run the [gate regression checks](AgentEvaluationsProject/Pipeline/Test-Gate.ps1)
-before selecting the updated commit in Azure DevOps.
+Run the [regression checks](VALIDATION.md#run-the-checks) before adopting code
+changes, then validate in your private environment.

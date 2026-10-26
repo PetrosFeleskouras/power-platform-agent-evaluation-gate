@@ -1,244 +1,139 @@
-# Deploy Solution with Agent Evaluation
+# Agent evaluation gates for Power Platform
 
-> **Complete setup:** [Start here](START-HERE.md) for Commit Solution, CI Build
-> and deployment instructions. Install the bridge through **Solutions > Import
-> solution** using the [unmanaged solution ZIP and guide](PowerAutomate/Solution/README.md).
-> The core deployment pipeline described below remains the original implementation.
+Run native Copilot Studio evaluations as part of an Azure DevOps release.
+A complete pass allows the selected managed solution package into TEST.
+Other outcomes retain the evaluation results and skip deployment.
 
-An **Azure DevOps YAML pipeline** that runs a packaged Copilot Studio evaluation
-against the source agent and promotes the selected managed solution artifact to
-TEST only after a complete pass.
+**[Start here](START-HERE.md)** ·
+**[Download the unmanaged bridge solution](https://github.com/PetrosFeleskouras/power-platform-agent-evaluation-gate/releases/download/bridge-v1.0.0/AgentEvaluationGateBridge_1_0_0_0_unmanaged.zip)** ·
+**[Import and enable the flow](PowerAutomate/Solution/README.md)**
 
-This repository hosts the deployment pipeline and its gate helpers. It is not a
-GitHub Actions workflow and does not create Power Platform environments, a
-Power Automate bridge, service connections or a CI producer automatically.
+## How it works
 
 ```text
-Existing Commit Solution -> Existing CI Build
-                                  |
-                     Select a managed CI artifact
-                                  |
-                  Validate package against live DEV
-                                  |
-                  Run native Copilot Studio evaluation
-                     /                         \
-                 Pass                     Other outcome
-                  |                            |
-         Verify package hash            Retain results
-                  |                     TEST is skipped
-         Existing import template
-                  |
-         Verify components in TEST
+Commit Solution -> CI Build -> Evaluation-gated deployment
+                                      |
+                         Compare CI package with DEV
+                                      |
+                        Run the packaged evaluation
+                              /              \
+                         All pass        Other outcome
+                            |                  |
+                    Import to TEST       Retain results
+                            |            Skip deployment
+                    Verify components
 ```
 
-## Included files
+1. **Commit Solution** exports a selected DEV solution into private source control.
+2. **CI Build** produces its managed/unmanaged ZIPs, settings and deployment scripts.
+3. **Deploy Solution with Agent Evaluation** downloads a selected CI build,
+   validates its package against DEV and calls the Power Automate bridge.
+4. The bridge runs the native evaluation and returns individual case results.
+5. A complete pass authorizes that exact managed ZIP for import into TEST.
 
-- [Deployment pipeline](Samples/AzureDevOps/PipelineDefinitions/deploy-solution-with-agent-evaluation.yml)
-- [Gate entry script](AgentEvaluationsProject/Pipeline/Invoke-Gate.ps1):
-  `Snapshot`, `Evaluate`, `BeforeImport`, `VerifyImport`
-- [Gate helpers](AgentEvaluationsProject/Pipeline/Gate.psm1):
-  solution discovery, package inspection, authenticated polling and result checks
-- [Local regression checks](AgentEvaluationsProject/Pipeline/Test-Gate.ps1)
-- [Existing workshop deployment template](Samples/AzureDevOps/Templates/deploy-solution-template.yml),
-  retained as a required dependency of the new pipeline
+Evaluations run against the **live DEV agent**. The pipeline compares covered
+agent configuration, skills and test content with the package, then rechecks
+source fingerprints and the package hash before import. Keep DEV content stable
+during the release.
 
-The original paths are preserved so YAML template references and script paths
-resolve without rewriting the verified implementation. This extraction adds
-`pr: none` alongside `trigger: none` to keep the GitHub-hosted deployment
-definition manual, including for pull requests.
+## What is included
 
-## Prerequisites
+| Component | File or guide |
+| --- | --- |
+| Commit Solution | [Pipeline YAML](Samples/AzureDevOps/PipelineDefinitions/commit-solution-changes.yml) |
+| CI Build | [Pipeline YAML](Samples/AzureDevOps/PipelineDefinitions/ci-build.yml) |
+| Evaluation-gated deployment | [Recommended pipeline YAML](Samples/AzureDevOps/PipelineDefinitions/deploy-solution-with-agent-evaluation-private.yml) |
+| Power Automate bridge | [Unmanaged solution and installation guide](PowerAutomate/Solution/README.md) |
+| Pipeline configuration | [Azure DevOps setup](Samples/AzureDevOps/README.md) |
+| Gate implementation | [Entry script](AgentEvaluationsProject/Pipeline/Invoke-Gate.ps1) and [helpers](AgentEvaluationsProject/Pipeline/Gate.psm1) |
+| Tests and verification scope | [Validation guide](VALIDATION.md) |
 
-### 1. A compatible CI Build in Azure DevOps
+These are **Azure DevOps pipelines**, not GitHub Actions workflows. Use a private
+Azure Repos repository for operational solution exports and pipeline runs.
 
-The pipeline resource is named `CI-Build` and refers to a producer named
-`CI Build` in the same Azure DevOps project. Change the resource's `source` if
-your producer has a different display name.
+## Solution requirements
 
-The producer can remain in another repository, including Azure Repos. Its
-selected successful run must publish these **Build Artifacts**, using the
-existing `PublishBuildArtifacts@1` convention:
+Each application solution must contain:
+
+- Exactly one Copilot Studio agent.
+- Exactly one packaged `EvaluationSet` and its nonempty set of
+  `MultiTurnEvaluationCase` components.
+- The agent's required skills as explicit solution members.
+
+The active evaluation name must resolve uniquely for that agent. Its returned
+test-set ID and exact case-ID set must match the packaged evaluation. Every case
+must complete and every reported metric must pass. Missing data, ambiguity,
+errors and timeouts prevent import.
+
+The bridge is installed separately in the source environment. The bridge ZIP
+does not contain your agents or evaluation datasets.
+
+## Getting started
+
+Follow [Start Here](START-HERE.md) to:
+
+1. Prepare a private Azure Repos repository and DEV/TEST service connections.
+2. Import the bridge using **Solutions > Import solution**.
+3. Bind its connection reference, configure its three environment variables and
+   enable the flow.
+4. Configure the pipeline variables and authorize the Azure DevOps resources.
+5. Run the three pipelines separately for each solution.
+
+The deployment run requires `SolutionName` and selection of the matching CI
+resource version. Service connections and environment settings are configured once.
+
+## Using an existing CI Build
+
+The gate can consume a compatible CI producer without changing its trigger or
+build logic. The selected run must publish these **Build Artifacts**:
 
 | Artifact | Required contents |
 | --- | --- |
 | `Solutions` | `<SolutionName>_managed.zip` |
-| `Settings` | `<SolutionName>.json`, prepared for the existing deployment template |
-| `Scripts` | A compatible deployment script bundle, including `IsSolutionInstalled.ps1`, `TransformDeploymentSettingsFile.ps1` and all required modules |
+| `Settings` | `<SolutionName>.json` |
+| `Scripts` | Compatible deployment helpers, including their `.psm1` dependencies |
 
-At deployment time, the scripts and solution packages are downloaded from the
-selected CI run. This repository includes adapted
-[script sources](Samples/AzureDevOps/Scripts/) and a
-[CI producer](Samples/AzureDevOps/PipelineDefinitions/ci-build.yml) that publishes
-both `.ps1` and `.psm1` dependencies. Operational solution exports are supplied by
-the user and are not included.
+The supplied [CI Build](Samples/AzureDevOps/PipelineDefinitions/ci-build.yml)
+publishes this contract for one selected solution. Its helper sources are in
+[Scripts](Samples/AzureDevOps/Scripts/).
 
-For new installations, follow [START-HERE](START-HERE.md) and use the
-private-runtime deployment copy with that adapted script bundle and its explicit
-target connection mappings. The original deployment entry point is retained for
-existing compatible workshop setups. Do not mix helper versions or omit their
-module dependencies.
+For existing workshop integrations, the
+[workshop-compatible deployment entry point](Samples/AzureDevOps/PipelineDefinitions/deploy-solution-with-agent-evaluation.yml)
+is also available. For a new setup, use the recommended pipeline above with the
+included helper bundle and [explicit target bindings](Samples/AzureDevOps/README.md#variable-groups).
 
-**CI does not have to be redesigned for the evaluation gate.** Its trigger can
-be automatic or manual, and its artifacts may contain additional solutions. It
-must produce the managed package and settings for the solution selected at
-deployment time. A producer hardcoded to an unrelated solution will not supply
-the required package.
+## Reviewing results
 
-### 2. Solution and evaluation in the source environment
+- `evaluation-gate-result` contains the source snapshot, evaluation results and,
+  when applicable, the reason deployment was blocked.
+- `evaluation-gated-deployment-result` adds release and post-import verification.
+- In `evaluation.json`, inspect metric statuses and grader explanations. Match
+  each `testCaseId` with `source.json` to identify its question.
+- In Copilot Studio, open the corresponding evaluation run to review the
+  responses and detailed assessments.
 
-The source solution must contain:
+Keep these artifacts private: evaluation content can include sensitive data.
 
-- Exactly one Copilot Studio agent.
-- Exactly one `EvaluationSet` Test case component.
-- Its nonempty set of `MultiTurnEvaluationCase` child components.
-- Explicit membership for the agent's skills.
+## Scope and safeguards
 
-The named active evaluation must resolve uniquely for that agent in the bridge.
-The returned test-set ID and exact set of case IDs must match the evaluation
-packaged in the source snapshot. Reordering cases is allowed; adding, replacing
-or omitting cases is not. The case count is discovered rather than hardcoded.
-The release rule requires every case to complete and every reported metric to pass.
+The pipeline checks exact agent/evaluation inventories, package identity and
+SHA-256, and verifies the imported components. It supports managed update/upgrade
+options; review those options because upgrades can remove omitted components.
 
-The evaluation runs on **live DEV content**, not inside a ZIP. Covered agent
-configuration, skills and evaluation payloads are compared with the downloaded
-package. Keep source content stable during export, evaluation and deployment.
-
-### 3. Power Platform authentication and evaluation bridge
-
-Install the Microsoft Power Platform Build Tools extension in Azure DevOps.
-Create source and target Power Platform service connections with the Dataverse
-permissions needed for discovery/exported-component reads and managed import.
-The hosted jobs use `windows-latest` and PowerShell 7.
-
-Configure an authenticated Power Automate HTTP bridge in DEV, using the native
-Microsoft Copilot Studio evaluation connector. An already configured bridge from
-the original deployment can be reused with its owner's authorization.
-
-**Install the bridge separately using the [unmanaged solution](PowerAutomate/Solution/README.md).** Its
-connection and caller allowlist are environment-specific. Configure the trigger
-for the intended source automation identity; do not use anonymous access.
-Use asynchronous HTTP responses for long-running evaluations. The caller handles
-`202`/`Location` polling and expects a final HTTP `200` JSON result.
-
-The bridge contract used by the included scripts:
-
-- Request fields: `solutionUniqueName`, `evaluationName`,
-  `sourceEnvironmentId`, `agentIds`, `correlationId`, `artifactSha256`,
-  `sourceFingerprint`.
-- The bridge finds exactly one active evaluation with the requested name across
-  the supplied agent IDs, starts that evaluation, polls to completion, and
-  returns the run identity and individual metric results.
-- Response fields: `schemaVersion` (integer `2`), the echoed
-  `solutionUniqueName`, `evaluationName`, `correlationId`, `artifactSha256`,
-  `sourceFingerprint`, plus `flowRunId`, `evaluationRunId`, `environmentId`,
-  `agentId`, `testSetId`, `state`, `expectedTests`, `totalTests`, `passedTests`,
-  `passed` (JSON boolean), and `testCasesResults`.
-- Each case has `testCaseId`, `state` and nonempty `metricsResults`. Each metric
-  has `type` and `result.status` (`Pass` or `Fail`). Successful release evidence
-  requires `Completed` run/case states and counts consistent with every case.
-- `expectedTests` comes from the evaluation start response. Return the completed
-  individual results even when some cases fail: the caller retains that evidence
-  and blocks import. Discovery errors, incomplete results and timeouts also block.
-
-See [Assert-GateResponse](AgentEvaluationsProject/Pipeline/Gate.psm1) and
-[the regression fixtures](AgentEvaluationsProject/Pipeline/Test-Gate.ps1)
-for the exact consumer-side validation. No live bridge URL, tenant ID, connection
-binding or operational run evidence is included in this repository. The supplied
-unmanaged bridge solution contains only portable definitions and safe defaults.
-
-### 4. One-time pipeline configuration
-
-Create these nonsecret pipeline variables; keep credential values in Azure
-DevOps service connections:
-
-| Variable | Purpose |
-| --- | --- |
-| `SOURCE_ENVIRONMENT_URL` | DEV Dataverse root HTTPS URL |
-| `SOURCE_ENVIRONMENT_ID` | DEV Power Platform environment GUID |
-| `SOURCE_TENANT_ID` | DEV tenant GUID |
-| `SOURCE_SERVICE_CONNECTION` | Source Power Platform service connection name |
-| `TARGET_ENVIRONMENT_URL` | TEST Dataverse root HTTPS URL |
-| `TARGET_ENVIRONMENT_ID` | TEST Power Platform environment GUID |
-| `TARGET_TENANT_ID` | TEST tenant GUID |
-| `TARGET_SERVICE_CONNECTION` | Target Power Platform service connection name |
-| `EVALUATION_BRIDGE_URL` | Authenticated HTTP trigger URL |
-| `EVALUATION_BRIDGE_WORKFLOW_ID` | Workflow ID in that URL (32 hexadecimal characters) |
-
-Create/authorize the variable groups `Generic Variables` and
-`TEST Environment Variables`. The latter supplies `SPNServiceConnection`,
-`EnvironmentVariableValues` and `ConnectionReferenceTokens` for the unchanged
-import template. Use the same target service connection for
-`SPNServiceConnection` and `TARGET_SERVICE_CONNECTION`, so the pre-import check
-and actual import address the same environment. Populate deployment-setting
-values according to your existing workshop setup.
-
-Create/authorize the Azure DevOps environment named `TEST`. Retain any required
-environment approval checks. Authorize the pipeline to use its variable groups,
-service connections and CI artifact resource.
-
-## Connect this GitHub repository to Azure DevOps
-
-1. In Azure DevOps, choose **Pipelines > New pipeline > GitHub**.
-2. Authorize access to this repository, including access if it is private.
-3. Select **Existing Azure Pipelines YAML file** and choose:
-   `Samples/AzureDevOps/PipelineDefinitions/deploy-solution-with-agent-evaluation.yml`.
-4. Save the pipeline as **Deploy Solution with Agent Evaluation**.
-5. Configure the prerequisites and variables above before running.
-6. Run your existing Commit Solution and CI Build for the desired solution.
-7. Manually run this deployment pipeline. Enter `SolutionName`, select the
-   matching successful CI resource version and review the import-option defaults.
-8. Review the evaluation evidence and TEST deployment outcome.
-
-Hosting the YAML on GitHub does not move or replace existing Azure DevOps
-pipelines. Connect it as a new definition or deliberately repoint an existing
-definition after validation. The repository upload itself queues no deployment.
-
-## Results and controls
-
-- `evaluation-gate-result` is published for evaluation success or failure.
-- On a complete pass, the pipeline verifies the exact package hash, agent
-  inventory and evaluation identities again before invoking the deployment
-  template using target settings.
-- Packages with additional agents, conflicting agent metadata or duplicate ZIP
-  entry paths are rejected.
-- The template supports managed update/upgrade options. Review those options
-  before running; upgrades can remove components omitted from a newer solution.
-- `evaluation-gated-deployment-result` retains the post-import verification.
-- Import verification covers the solution, agent, skills, evaluation and cases.
-  Explicit agent publishing and channel readiness are separate lifecycle steps.
-- This implementation targets TEST only.
-
-Native grading is probabilistic. Source fingerprints are change-detection
-guards, not atomic DEV locks. Package/content checks and a passing evaluation
-are useful release evidence, not comprehensive certification of every scenario.
-Use task-appropriate graders, human review and wider ALM controls.
-
-## Validate locally
-
-From the repository root, using PowerShell 7:
-
-```powershell
-pwsh -NoProfile -File .\AgentEvaluationsProject\Pipeline\Test-Gate.ps1
-```
-
-These checks exercise response validation and package fixtures without starting
-native evaluations or importing a solution. Azure DevOps compilation, service
-connection authorization, the external bridge and a representative CI artifact
-must also be verified in each destination setup.
+This sample targets TEST. Agent publishing, channel readiness and PROD promotion
+are separate lifecycle steps. Native grading is probabilistic, and fingerprints
+are change-detection guards rather than an atomic DEV lock. Combine evaluations
+with human review and the release controls appropriate to your application.
 
 ## Origin and references
 
-The evaluation pipeline/helpers were developed for a Power Platform ALM demo.
-The included deployment template is reused from the Advanced ALM for Power
-Platform workshop associated with Sean Astrakhan and Parvez Ghumra; it is a
-dependency, not newly authored gate logic.
+The deployment pattern builds on the Advanced ALM for Power Platform workshop
+associated with **Sean Astrakhan** and **Parvez Ghumra**.
 
-**Public visibility is not an open-source licence.** No repository-wide reuse
-licence has been established for the mixed original/adapted workshop material.
-See [reuse and attribution status](REUSE.md) before redistribution or incorporating
-this material into another product. Attribution is preserved, and this repository
-does not claim rights it cannot establish.
+**Reuse permissions remain unestablished.** Public availability is not a
+repository-wide open-source licence. Read [REUSE.md](REUSE.md) before redistribution
+or incorporating the material into another product.
 
-- [Microsoft Learn: agent evaluation](https://learn.microsoft.com/en-us/microsoft-copilot-studio/analytics-agent-evaluation-intro)
-- [Microsoft Learn: evaluation connectors](https://learn.microsoft.com/en-us/microsoft-copilot-studio/analytics-agent-evaluation-automate-tools)
-- [Microsoft Learn: run evaluations and view results](https://learn.microsoft.com/en-us/microsoft-copilot-studio/analytics-agent-evaluation-results)
+- [About agent evaluation](https://learn.microsoft.com/en-us/microsoft-copilot-studio/analytics-agent-evaluation-intro)
+- [Evaluation connectors](https://learn.microsoft.com/en-us/microsoft-copilot-studio/analytics-agent-evaluation-automate-tools)
+- [Run evaluations and view results](https://learn.microsoft.com/en-us/microsoft-copilot-studio/analytics-agent-evaluation-results)

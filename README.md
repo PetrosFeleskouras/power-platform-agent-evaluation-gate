@@ -63,12 +63,20 @@ existing `PublishBuildArtifacts@1` convention:
 | --- | --- |
 | `Solutions` | `<SolutionName>_managed.zip` |
 | `Settings` | `<SolutionName>.json`, prepared for the existing deployment template |
-| `Scripts` | The existing workshop deployment script bundle, including `IsSolutionInstalled.ps1` and `TransformDeploymentSettingsFile.ps1` and their dependencies |
+| `Scripts` | A compatible deployment script bundle, including `IsSolutionInstalled.ps1`, `TransformDeploymentSettingsFile.ps1` and all required modules |
 
-These scripts and the solution packages come from the selected CI run; they are
-not copied into this repository. The original workshop producer's script bundle
-is the verified dependency. A different producer must supply compatible scripts
-with the same parameters and deployment-variable behavior.
+At deployment time, the scripts and solution packages are downloaded from the
+selected CI run. This repository includes adapted
+[script sources](Samples/AzureDevOps/Scripts/) and a
+[CI producer](Samples/AzureDevOps/PipelineDefinitions/ci-build.yml) that publishes
+both `.ps1` and `.psm1` dependencies. Operational solution exports are supplied by
+the user and are not included.
+
+For new installations, follow [START-HERE](START-HERE.md) and use the
+private-runtime deployment copy with that adapted script bundle and its explicit
+target connection mappings. The original deployment entry point is retained for
+existing compatible workshop setups. Do not mix helper versions or omit their
+module dependencies.
 
 **CI does not have to be redesigned for the evaluation gate.** Its trigger can
 be automatic or manual, and its artifacts may contain additional solutions. It
@@ -86,8 +94,10 @@ The source solution must contain:
 - Explicit membership for the agent's skills.
 
 The named active evaluation must resolve uniquely for that agent in the bridge.
-The case count is discovered rather than hardcoded. The release rule requires
-every case to complete and every reported metric to pass.
+The returned test-set ID and exact set of case IDs must match the evaluation
+packaged in the source snapshot. Reordering cases is allowed; adding, replacing
+or omitting cases is not. The case count is discovered rather than hardcoded.
+The release rule requires every case to complete and every reported metric to pass.
 
 The evaluation runs on **live DEV content**, not inside a ZIP. Covered agent
 configuration, skills and evaluation payloads are compared with the downloaded
@@ -186,8 +196,11 @@ definition after validation. The repository upload itself queues no deployment.
 ## Results and controls
 
 - `evaluation-gate-result` is published for evaluation success or failure.
-- On a complete pass, the pipeline verifies the exact package hash and invokes
-  the existing deployment template using target settings.
+- On a complete pass, the pipeline verifies the exact package hash, agent
+  inventory and evaluation identities again before invoking the deployment
+  template using target settings.
+- Packages with additional agents, conflicting agent metadata or duplicate ZIP
+  entry paths are rejected.
 - The template supports managed update/upgrade options. Review those options
   before running; upgrades can remove components omitted from a newer solution.
 - `evaluation-gated-deployment-result` retains the post-import verification.
@@ -218,9 +231,13 @@ must also be verified in each destination setup.
 The evaluation pipeline/helpers were developed for a Power Platform ALM demo.
 The included deployment template is reused from the Advanced ALM for Power
 Platform workshop associated with Sean Astrakhan and Parvez Ghumra; it is a
-dependency, not newly authored gate logic. This extraction does not assign a new
-license to inherited workshop material. Confirm redistribution permissions before
-making a public release.
+dependency, not newly authored gate logic.
+
+**Public visibility is not an open-source licence.** No repository-wide reuse
+licence has been established for the mixed original/adapted workshop material.
+See [reuse and attribution status](REUSE.md) before redistribution or incorporating
+this material into another product. Attribution is preserved, and this repository
+does not claim rights it cannot establish.
 
 - [Microsoft Learn: agent evaluation](https://learn.microsoft.com/en-us/microsoft-copilot-studio/analytics-agent-evaluation-intro)
 - [Microsoft Learn: evaluation connectors](https://learn.microsoft.com/en-us/microsoft-copilot-studio/analytics-agent-evaluation-automate-tools)

@@ -41,9 +41,10 @@ try {
                 sourceEnvironmentId=$config.sourceEnvironmentId; agentIds=@($stamp.agents.agentId)
                 correlationId=$CorrelationId; artifactSha256=$package.sha256; sourceFingerprint=$stamp.fingerprint
             }
+            $expected = New-GateExpectation $request $stamp
             $result = Invoke-EvaluationBridge $config $request
             $result | ConvertTo-Json -Depth 40 | Set-Content -LiteralPath (Join-Path $OutputDirectory 'evaluation.json') -Encoding utf8
-            Assert-GateResponse $result $request $config
+            Assert-GateResponse $result $expected $config
             $after = Get-SourceStamp $config $SolutionUniqueName
             if ($after.fingerprint -cne $stamp.fingerprint) { throw 'Source changed during evaluation; result cannot authorize this package.' }
             @{
@@ -75,6 +76,7 @@ try {
                 correlationId=$manifest.correlationId; artifactSha256=$manifest.artifactSha256
                 sourceFingerprint=$manifest.sourceFingerprint; agentIds=@($manifest.agents.agentId)
             }
+            $expected = New-GateExpectation $expected $manifest
             Assert-GateResponse $result $expected $config
             if ($result.evaluationRunId -cne $manifest.evaluationRunId -or $result.agentId -cne $manifest.evaluatedAgentId -or
                 $result.testSetId -cne $manifest.testSetId -or $result.flowRunId -cne $manifest.flowRunId) {

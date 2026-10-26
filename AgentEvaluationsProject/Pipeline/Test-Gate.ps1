@@ -27,6 +27,8 @@ $valid.passed = $true
 $valid.testCasesResults = @(1..10 | ForEach-Object {
     @{testCaseId="case-$_"; state='Completed'; metricsResults=@(@{type='GeneralQuality'; result=@{status='Pass'}})}
 })
+$expected.testSetId = $testSetId
+$expected.testCaseIds = @($valid.testCasesResults.testCaseId)
 $script:count = 0
 function Test-Case {
     param([string]$Name, [scriptblock]$Body)
@@ -83,7 +85,9 @@ Test-Case 'Invalid solution name is rejected before querying or exporting' { Exp
 Test-Case 'Arbitrary case count is supported, not fixed at ten' {
     $r=Copy-Result; $r.testCasesResults=$r.testCasesResults[0..2]
     $r.expectedTests=3; $r.totalTests=3; $r.passedTests=3
-    Assert-GateResponse $r $expected $config
+    $threeCaseExpectation=$expected.Clone()
+    $threeCaseExpectation.testCaseIds=@($r.testCasesResults.testCaseId)
+    Assert-GateResponse $r $threeCaseExpectation $config
 }
 Test-Case 'Non-GeneralQuality metric and multiple metrics can pass' {
     $r=Copy-Result; $r.testCasesResults[0].metricsResults=@(
@@ -98,6 +102,83 @@ Test-Case 'Every metric must pass' {
     Expect-Rejection { Assert-GateResponse $r $expected $config }
 }
 Test-Case 'Missing expected count is rejected' { $r=Copy-Result; $r.Remove('expectedTests'); Expect-Rejection { Assert-GateResponse $r $expected $config } }
+Test-Case 'Different well-formed test set cannot authorize the package' {
+    $r=Copy-Result; $r.testSetId='66666666-6666-6666-6666-666666666666'
+    Expect-Rejection { Assert-GateResponse $r $expected $config }
+}
+Test-Case 'An unrelated case cannot replace a packaged case' {
+    $r=Copy-Result; $r.testCasesResults[0].testCaseId='unrelated-case'
+    Expect-Rejection { Assert-GateResponse $r $expected $config }
+}
+Test-Case 'A self-consistent smaller evaluation cannot authorize a larger packaged set' {
+    $r=Copy-Result; $r.testCasesResults=@($r.testCasesResults[0..2])
+    $r.expectedTests=3; $r.totalTests=3; $r.passedTests=3
+    Expect-Rejection { Assert-GateResponse $r $expected $config }
+}
+Test-Case 'A self-consistent larger evaluation cannot add a case to the package' {
+    $r=Copy-Result
+    $r.testCasesResults+=@{testCaseId='additional-case';state='Completed';metricsResults=@(@{type='GeneralQuality';result=@{status='Pass'}})}
+    $r.expectedTests=11; $r.totalTests=11; $r.passedTests=11
+    Expect-Rejection { Assert-GateResponse $r $expected $config }
+}
+Test-Case 'Case order does not affect exact inventory matching' {
+    $r=Copy-Result; [array]::Reverse($r.testCasesResults)
+    Assert-GateResponse $r $expected $config
+}
+Test-Case 'Case ID casing is normalized for inventory matching' {
+    $r=Copy-Result; $r.testCasesResults[0].testCaseId='CASE-1'
+    Assert-GateResponse $r $expected $config
+}
+Test-Case 'Non-string result case ID is rejected' {
+    $r=Copy-Result; $r.testCasesResults[0].testCaseId=1
+    Expect-Rejection { Assert-GateResponse $r $expected $config }
+}
+foreach($scenario in 'MissingSet','InvalidSet','MissingCases','EmptyCases','DuplicateCases','InvalidCaseType') {
+    Test-Case "Invalid packaged expectations: $scenario" {
+        $e=$expected | ConvertTo-Json -Depth 10 | ConvertFrom-Json -AsHashtable
+        switch($scenario) {
+            'MissingSet' {$null=$e.Remove('testSetId')}
+            'InvalidSet' {$e.testSetId='not-a-guid'}
+            'MissingCases' {$null=$e.Remove('testCaseIds')}
+            'EmptyCases' {$e.testCaseIds=@()}
+            'DuplicateCases' {$e.testCaseIds[1]=$e.testCaseIds[0]}
+            'InvalidCaseType' {$e.testCaseIds[0]=1}
+        }
+        Expect-Rejection { Assert-GateResponse (Copy-Result) $e $config }
+    }
+}
+$wireRequest=$expected.Clone()
+$null=$wireRequest.Remove('testSetId')
+$null=$wireRequest.Remove('testCaseIds')
+$expectationSource=@{
+    solutionName=$expected.solutionUniqueName
+    agents=@(@{
+        agentId=$agentId
+        evaluation=@{name=$expected.evaluationName;testSetId=$testSetId;cases=@($expected.testCaseIds | ForEach-Object { @{testCaseId=$_} })}
+    })
+}
+Test-Case 'Snapshot expectations do not change the bridge request contract' {
+    $jsonBefore=$wireRequest|ConvertTo-Json -Depth 10 -Compress
+    $bound=New-GateExpectation $wireRequest $expectationSource
+    if (($wireRequest|ConvertTo-Json -Depth 10 -Compress) -cne $jsonBefore) { throw 'Request was mutated.' }
+    if ($wireRequest.ContainsKey('testSetId') -or $wireRequest.ContainsKey('testCaseIds')) { throw 'Private expectations leaked into the wire request.' }
+    Assert-GateResponse (Copy-Result) $bound $config
+    $r=Copy-Result; $r.testSetId='66666666-6666-6666-6666-666666666666'
+    Expect-Rejection { Assert-GateResponse $r $bound $config }
+}
+Test-Case 'Release expectations survive JSON serialization and reject unrelated cases' {
+    $release=$expectationSource|ConvertTo-Json -Depth 15|ConvertFrom-Json -AsHashtable
+    $bound=New-GateExpectation $wireRequest $release
+    Assert-GateResponse (Copy-Result) $bound $config
+    $r=Copy-Result; $r.testCasesResults[0].testCaseId='unrelated-case'
+    Expect-Rejection { Assert-GateResponse $r $bound $config }
+}
+Test-Case 'Request cannot bind expectations from another solution or agent' {
+    $request=$wireRequest.Clone();$request.solutionUniqueName='AnotherSolution'
+    Expect-Rejection { New-GateExpectation $request $expectationSource }
+    $request=$wireRequest.Clone();$request.agentIds=@('66666666-6666-6666-6666-666666666666')
+    Expect-Rejection { New-GateExpectation $request $expectationSource }
+}
 function New-PackageFixture {
     param([string]$Path, [hashtable]$Entries)
     $zip = [IO.Compression.ZipFile]::Open($Path, [IO.Compression.ZipArchiveMode]::Create)
@@ -144,7 +225,10 @@ $metadataPath = 'botcomponents/demo_agent.skill.onboarding-plan_abc/botcomponent
 $payloadPath = 'botcomponents/demo_agent.skill.onboarding-plan_abc/data'
 $evaluationMetadata = '<botcomponent schemaname="demo_agent.evaluation"><componenttype>19</componenttype><name>Demo evaluation</name><parentbotid><schemaname>demo_agent</schemaname></parentbotid></botcomponent>'
 $caseMetadata = '<botcomponent schemaname="demo_agent.evaluation.case"><componenttype>19</componenttype><name>Demo case</name><parentbotcomponentid><schemaname>demo_agent.evaluation</schemaname></parentbotcomponentid><parentbotid><schemaname>demo_agent</schemaname></parentbotid></botcomponent>'
-foreach ($scenario in 'MentionOnly','Complete','WrongParent','MissingPayload','WrongType') {
+foreach ($scenario in 'MentionOnly','Complete','WrongParent','MissingPayload','WrongType',
+    'ExtraAgent','ExtraAgentMetadataOnly','ExtraAgentConfigurationOnly','MissingAgentMetadata',
+    'WrongAgentMetadata','DuplicateAgentMetadata','DuplicateCaseVariant','BackslashAgentPath',
+    'WrongAgentDirectoryCase','EmptyAgentExpectation','MultipleAgentExpectations') {
     Test-Case "Package structure: $scenario" {
         $path = Join-Path ([IO.Path]::GetTempPath()) "hr-gate-test-$([guid]::NewGuid()).zip"
         try {
@@ -163,12 +247,33 @@ foreach ($scenario in 'MentionOnly','Complete','WrongParent','MissingPayload','W
             }
             if ($scenario -eq 'WrongParent') { $entries[$metadataPath] = $metadata.Replace('<schemaname>demo_agent</schemaname>','<schemaname>another_agent</schemaname>') }
             if ($scenario -eq 'WrongType') { $entries[$metadataPath] = $metadata.Replace('<componenttype>9</componenttype>','<componenttype>19</componenttype>') }
+            if ($scenario -in @('ExtraAgent','ExtraAgentMetadataOnly')) {
+                $entries['bots/additional_agent/bot.xml']='<bot schemaname="additional_agent"/>'
+            }
+            if ($scenario -in @('ExtraAgent','ExtraAgentConfigurationOnly')) {
+                $entries['bots/additional_agent/configuration.json']='{"instructions":"Synthetic additional agent"}'
+            }
+            if ($scenario -eq 'MissingAgentMetadata') { $null=$entries.Remove('bots/demo_agent/bot.xml') }
+            if ($scenario -eq 'WrongAgentMetadata') { $entries['bots/demo_agent/bot.xml']='<bot schemaname="another_agent"/>' }
+            if ($scenario -eq 'BackslashAgentPath') { $entries['bots\additional_agent\bot.xml']='<bot schemaname="additional_agent"/>' }
+            if ($scenario -eq 'WrongAgentDirectoryCase') { $entries['Bots/additional_agent/bot.xml']='<bot schemaname="additional_agent"/>' }
             New-PackageFixture $path $entries
+            if ($scenario -in @('DuplicateAgentMetadata','DuplicateCaseVariant')) {
+                $duplicatePath=if($scenario -eq 'DuplicateAgentMetadata'){'bots/demo_agent/bot.xml'}else{'bots/demo_agent/BOT.XML'}
+                $zip=[IO.Compression.ZipFile]::Open($path,[IO.Compression.ZipArchiveMode]::Update)
+                try {
+                    $writer=[IO.StreamWriter]::new($zip.CreateEntry($duplicatePath).Open())
+                    try {$writer.Write('<bot schemaname="demo_agent"/>')}finally{$writer.Dispose()}
+                } finally {$zip.Dispose()}
+            }
+            $candidate=$fixtureCandidate|ConvertTo-Json -Depth 15|ConvertFrom-Json -AsHashtable
+            if($scenario -eq 'EmptyAgentExpectation'){$candidate.agents=@()}
+            if($scenario -eq 'MultipleAgentExpectations'){$candidate.agents+=@{schemaName='additional_agent'}}
             if ($scenario -eq 'Complete') {
-                $package = Read-SolutionPackage $path $fixtureCandidate
+                $package = Read-SolutionPackage $path $candidate
                 if ($package.version -cne '1.0.0.0' -or $package.sha256.Length -ne 64) { throw 'Invalid package identity.' }
             }
-            else { Expect-Rejection { Read-SolutionPackage $path $fixtureCandidate } }
+            else { Expect-Rejection { Read-SolutionPackage $path $candidate } }
         }
         finally { if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -ErrorAction Stop } }
     }

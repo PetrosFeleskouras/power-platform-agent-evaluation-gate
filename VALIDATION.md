@@ -1,5 +1,36 @@
 # Validation of the new publication copies
 
+## Repository review corrections
+
+The pipeline-side review fixes add exact identity binding:
+
+- Evaluation responses must carry the packaged test-set ID and the exact
+  packaged case-ID set. Different well-formed IDs, additional/missing cases and
+  inconsistent expected inventories are rejected.
+- Both `Evaluate` and `BeforeImport` derive these expectations from the preserved
+  source/agent inventory. Internal expectations are not added to the bridge
+  request; HTTP contract version 2 remains compatible.
+- Package inspection rejects additional agents, missing/mismatched bot metadata,
+  duplicate ZIP entries and noncanonical paths.
+- README dependency wording now distinguishes included adapted script sources
+  from the CI artifacts used at runtime.
+- [REUSE.md](REUSE.md) documents the absence of an established reuse licence.
+  It is a status notice, not a new permission grant.
+
+Validation performed for these corrections:
+
+- **68 gate regression checks passed**, including 27 additional cases.
+- **40 publication/privacy regression checks passed**.
+- The unmanaged solution package check passed; its ZIP is unchanged.
+- Read-only checks against recorded demo evidence confirmed that the complete
+  passing result and its CI package are still accepted, and the failing result
+  still reaches the expected 8/10 quality-gate rejection.
+
+Those recorded artifacts were downloaded privately and removed after inspection;
+their environment values and run evidence are not added to this repository.
+No cloud pipeline, native evaluation, solution import or live flow was run or
+changed for these corrections.
+
 ## Unmanaged solution release
 
 The recommended bridge delivery is now the

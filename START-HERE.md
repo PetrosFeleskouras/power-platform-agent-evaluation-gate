@@ -76,8 +76,23 @@ The producer/import pattern originates from the Advanced ALM for Power Platform
 workshop credited in the [original README](README.md#origin-and-references).
 The scripts/templates here are separate adaptations for private-runtime use.
 No new license is assigned to inherited material.
+See [REUSE.md](REUSE.md) for the current permissions status and provenance checks.
 
 Automated privacy checks catch specified patterns and reject unsupported binary
 source; they cannot certify arbitrary natural-language content as PII-free.
 Review your solution content and keep runtime repositories, logs and artifacts
 private, even when a scan passes.
+
+## Updating the gate after the repository review
+
+Update [Gate.psm1](AgentEvaluationsProject/Pipeline/Gate.psm1) and
+[Invoke-Gate.ps1](AgentEvaluationsProject/Pipeline/Invoke-Gate.ps1) together in
+your private runtime repository. Both evaluation-time and pre-import validation
+now require the packaged test-set identity, exact case-ID set and exact agent
+inventory. The bridge HTTP request/response contract remains version 2.
+
+The unmanaged bridge ZIP is unchanged; these corrections are pipeline-side.
+Use the current pipeline source from `main` rather than assuming a historical
+bridge release's automatic source-code archive includes later gate fixes.
+Run the [gate regression checks](AgentEvaluationsProject/Pipeline/Test-Gate.ps1)
+before selecting the updated commit in Azure DevOps.

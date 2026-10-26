@@ -191,8 +191,30 @@ function Get-SourceStamp {
 
 function Read-SolutionPackage {
     param([string]$Path, [hashtable]$Selected)
+    if ($Selected.agents -isnot [array] -or $Selected.agents.Count -ne 1 -or
+        [string]::IsNullOrWhiteSpace($Selected.agents[0].schemaName)) {
+        throw 'The package must be authorized by a snapshot containing exactly one agent.'
+    }
     $zip = [IO.Compression.ZipFile]::OpenRead((Resolve-Path -LiteralPath $Path).Path)
     try {
+        $entryNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        $agentSchemas = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+        foreach ($zipEntry in $zip.Entries) {
+            if ($zipEntry.FullName.Contains('\') -or $zipEntry.FullName.Contains(':') -or
+                $zipEntry.FullName.StartsWith('/') -or $zipEntry.FullName -match '(^|/)\.\.?(/|$)' -or
+                -not $entryNames.Add($zipEntry.FullName)) {
+                throw 'Package contains a noncanonical or duplicate entry path.'
+            }
+            if ($zipEntry.FullName -imatch '^bots/([^/]+)') {
+                if (-not $zipEntry.FullName.StartsWith('bots/', [StringComparison]::Ordinal)) {
+                    throw 'Package agent paths must use the canonical bots directory.'
+                }
+                $null = $agentSchemas.Add($Matches[1])
+            }
+        }
+        if ($agentSchemas.Count -ne 1 -or -not $agentSchemas.Contains($Selected.agents[0].schemaName)) {
+            throw 'Packaged agent inventory differs from the selected source snapshot.'
+        }
         $entry = $zip.GetEntry('solution.xml')
         if ($null -eq $entry) { throw 'Package has no solution.xml.' }
         $reader = [IO.StreamReader]::new($entry.Open())
@@ -203,7 +225,13 @@ function Read-SolutionPackage {
         }
         $expectedTestSchemas = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
         foreach ($agent in $Selected.agents) {
-          if ($null -eq $zip.GetEntry("bots/$($agent.schemaName)/bot.xml")) { throw "Exported agent missing: $($agent.schemaName)" }
+          $agentEntry = $zip.GetEntry("bots/$($agent.schemaName)/bot.xml")
+          if ($null -eq $agentEntry) { throw "Exported agent missing: $($agent.schemaName)" }
+          $agentReader = [IO.StreamReader]::new($agentEntry.Open())
+          try { [xml]$agentMetadata = $agentReader.ReadToEnd() } finally { $agentReader.Dispose() }
+          if ([string]$agentMetadata.bot.schemaname -cne $agent.schemaName) {
+              throw 'Packaged agent metadata identity differs from its selected schema.'
+          }
           $configurationEntry = $zip.GetEntry("bots/$($agent.schemaName)/configuration.json")
           if ($null -eq $configurationEntry) { throw "Exported agent configuration missing: $($agent.schemaName)" }
           $configurationReader = [IO.StreamReader]::new($configurationEntry.Open())
@@ -276,8 +304,40 @@ function Read-SolutionPackage {
     finally { $zip.Dispose() }
 }
 
+function New-GateExpectation {
+    param([hashtable]$Request, [hashtable]$Selected)
+    if ($Selected.agents -isnot [array] -or $Selected.agents.Count -ne 1) {
+        throw 'Evaluation expectations require exactly one snapshotted agent.'
+    }
+    $agent = $Selected.agents[0]
+    if ($Request.solutionUniqueName -cne $Selected.solutionName -or
+        $Request.evaluationName -cne $agent.evaluation.name -or
+        @($Request.agentIds).Count -ne 1 -or $Request.agentIds[0] -ine $agent.agentId) {
+        throw 'Evaluation request and packaged source identities differ.'
+    }
+    $expected = $Request.Clone()
+    $expected.testSetId = $agent.evaluation.testSetId
+    $expected.testCaseIds = @($agent.evaluation.cases | ForEach-Object { $_.testCaseId })
+    $expected
+}
+
 function Assert-GateResponse {
     param([hashtable]$Result, [hashtable]$Expected, [hashtable]$Config)
+    $expectedSetId = [guid]::Empty
+    if (-not $Expected.ContainsKey('testSetId') -or $Expected.testSetId -isnot [string] -or
+        -not [guid]::TryParse($Expected.testSetId, [ref]$expectedSetId) -or $expectedSetId -eq [guid]::Empty) {
+        throw 'A valid packaged evaluation test-set identity is required.'
+    }
+    if (-not $Expected.ContainsKey('testCaseIds') -or $Expected.testCaseIds -isnot [array] -or
+        $Expected.testCaseIds.Count -eq 0) {
+        throw 'A nonempty packaged evaluation case inventory is required.'
+    }
+    $expectedCaseIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($caseId in $Expected.testCaseIds) {
+        if ($caseId -isnot [string] -or [string]::IsNullOrWhiteSpace($caseId) -or -not $expectedCaseIds.Add($caseId)) {
+            throw 'Packaged evaluation case inventory contains an invalid or duplicate identity.'
+        }
+    }
     foreach ($field in 'schemaVersion','solutionUniqueName','evaluationName','correlationId','artifactSha256','sourceFingerprint','flowRunId','evaluationRunId','environmentId','agentId','testSetId','state','expectedTests','totalTests','passedTests','passed','testCasesResults') {
         if (-not $Result.ContainsKey($field)) { throw "Evaluation response is missing $field." }
     }
@@ -295,12 +355,21 @@ function Assert-GateResponse {
         $id=[guid]::Empty
         if ($Result[$field] -isnot [string] -or -not [guid]::TryParse($Result[$field],[ref]$id) -or $id -eq [guid]::Empty) { throw "Invalid identity: $field" }
     }
+    if ([guid]$Result.testSetId -ne $expectedSetId) {
+        throw 'Evaluated test set differs from the packaged evaluation.'
+    }
+    if ($Result.expectedTests -ne $expectedCaseIds.Count) {
+        throw 'Evaluation case count differs from the packaged case inventory.'
+    }
     if ([string]::IsNullOrWhiteSpace($Result.flowRunId)) { throw 'Missing flow run identity.' }
     if ($Result.testCasesResults -isnot [array] -or $Result.testCasesResults.Count -ne $Result.expectedTests) { throw 'Incomplete individual results.' }
     $ids = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     $passed = 0
     foreach ($case in $Result.testCasesResults) {
-        if ($case -isnot [hashtable] -or -not $case.ContainsKey('testCaseId') -or -not $ids.Add([string]$case.testCaseId) -or [string]::IsNullOrWhiteSpace($case.testCaseId)) { throw 'Invalid or duplicate case ID.' }
+        if ($case -isnot [hashtable] -or -not $case.ContainsKey('testCaseId') -or
+            $case.testCaseId -isnot [string] -or [string]::IsNullOrWhiteSpace($case.testCaseId) -or
+            -not $ids.Add($case.testCaseId)) { throw 'Invalid or duplicate case ID.' }
+        if (-not $expectedCaseIds.Contains($case.testCaseId)) { throw 'Evaluation returned a case outside the packaged case inventory.' }
         if ($case.state -cne 'Completed') { throw 'A test case did not complete.' }
         if ($case.metricsResults -isnot [array] -or $case.metricsResults.Count -eq 0) { throw 'Missing metric coverage.' }
         $casePassed = $true
@@ -310,6 +379,7 @@ function Assert-GateResponse {
         }
         if ($casePassed) { $passed++ }
     }
+    if (-not $expectedCaseIds.SetEquals($ids)) { throw 'Returned case identities differ from the packaged case inventory.' }
     if ($Result.passedTests -ne $passed -or $Result.passed -ne ($passed -eq $Result.expectedTests)) { throw 'Summary and individual case results disagree.' }
     if ($passed -ne $Result.expectedTests) { throw "Evaluation gate FAILED: $passed/$($Result.expectedTests) passed; target deployment is blocked." }
 }
@@ -380,4 +450,4 @@ function Invoke-EvaluationBridge {
     throw 'Evaluation deadline exceeded; target deployment is blocked. The remote flow may still be running.'
 }
 
-Export-ModuleMember -Function Get-GateConfig,Assert-SolutionName,Get-TextHash,Get-PayloadKind,Get-ServiceToken,Invoke-DataverseRead,Get-DataverseRows,Get-SourceStamp,Read-SolutionPackage,Assert-GateResponse,Assert-PollUri,Invoke-EvaluationBridge
+Export-ModuleMember -Function Get-GateConfig,Assert-SolutionName,Get-TextHash,Get-PayloadKind,Get-ServiceToken,Invoke-DataverseRead,Get-DataverseRows,Get-SourceStamp,Read-SolutionPackage,New-GateExpectation,Assert-GateResponse,Assert-PollUri,Invoke-EvaluationBridge

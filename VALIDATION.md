@@ -1,5 +1,38 @@
 # Validation of the new publication copies
 
+## Unmanaged solution release
+
+The recommended bridge delivery is now the
+[unmanaged solution package](PowerAutomate/Solution/README.md), version `1.0.0.0`.
+The custom installer remains an optional earlier alternative.
+
+- Exported a separately created solution containing one new flow, one connection
+  reference and three required environment-variable definitions.
+- Inspected all seven ZIP entries. The only nonzero GUID is the stable workflow
+  component identity. Publisher contact fields are empty; no operational
+  environment/caller/connection values or current variable values are included.
+- Imported the exact distributable ZIP into a second environment successfully.
+- Verified unmanaged type, flow Off, one unbound reference, three definitions and
+  zero current values after that import.
+- On the separate source solution copy, bound a connection and supplied private
+  current values. Verified successful turn-on, HTTP 401 for an anonymous caller
+  and a blocking result for an authorized request with a mismatched environment.
+- Returned the source flow to Off and removed only its temporary validation
+  values/binding before exporting the final package.
+- Imported that final clean package again into the task-created target solution.
+  The published ZIP's SHA-256 is
+  `5744FD2E8E80849BC28CD87E6140921EA3F93868AF8F9D7BD455924C2CD81114`.
+
+The second environment had no Copilot Studio connection, so enablement was
+verified on the new source copy rather than claimed in the second environment.
+Existing application solutions, agents, connections and pipeline definitions were
+not edited. This task did not run a native evaluation or application deployment.
+
+Run [Test-SolutionPackage.ps1](PowerAutomate/Solution/Test-SolutionPackage.ps1)
+to reproduce the package-content checks. Unpacked source is included for review.
+
+## Earlier source-installer publication validation
+
 Validation date: 26 October 2026 (UTC).
 
 ## Preservation boundary

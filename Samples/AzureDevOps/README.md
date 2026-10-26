@@ -99,7 +99,7 @@ Configure the existing deployment variables as described in the
 Use the same target connection for `TARGET_SERVICE_CONNECTION` and the TEST
 group's `SPNServiceConnection`. Authorize the `TEST` Azure DevOps environment
 and preserve required approvals. Configure the bridge as described in
-[Bridge setup](../../PowerAutomate/Bridge/README.md).
+[unmanaged solution setup](../../PowerAutomate/Solution/README.md).
 
 ## Privacy checks and limits
 

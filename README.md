@@ -1,5 +1,10 @@
 # Deploy Solution with Agent Evaluation
 
+> **Complete setup:** [Start here](START-HERE.md) for Commit Solution, CI Build
+> and deployment instructions. Install the bridge through **Solutions > Import
+> solution** using the [unmanaged solution ZIP and guide](PowerAutomate/Solution/README.md).
+> The core deployment pipeline described below remains the original implementation.
+
 An **Azure DevOps YAML pipeline** that runs a packaged Copilot Studio evaluation
 against the source agent and promotes the selected managed solution artifact to
 TEST only after a complete pass.
@@ -99,7 +104,7 @@ Configure an authenticated Power Automate HTTP bridge in DEV, using the native
 Microsoft Copilot Studio evaluation connector. An already configured bridge from
 the original deployment can be reused with its owner's authorization.
 
-**The bridge flow is an external dependency and is not exported here.** Its
+**Install the bridge separately using the [unmanaged solution](PowerAutomate/Solution/README.md).** Its
 connection and caller allowlist are environment-specific. Configure the trigger
 for the intended source automation identity; do not use anonymous access.
 Use asynchronous HTTP responses for long-running evaluations. The caller handles
@@ -128,7 +133,8 @@ The bridge contract used by the included scripts:
 See [Assert-GateResponse](AgentEvaluationsProject/Pipeline/Gate.psm1) and
 [the regression fixtures](AgentEvaluationsProject/Pipeline/Test-Gate.ps1)
 for the exact consumer-side validation. No live bridge URL, tenant ID, connection
-binding, solution export or run evidence is included in this repository.
+binding or operational run evidence is included in this repository. The supplied
+unmanaged bridge solution contains only portable definitions and safe defaults.
 
 ### 4. One-time pipeline configuration
 

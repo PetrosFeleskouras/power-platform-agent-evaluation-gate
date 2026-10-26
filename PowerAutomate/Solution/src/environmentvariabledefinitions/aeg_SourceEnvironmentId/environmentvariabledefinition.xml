@@ -1,0 +1,14 @@
+<environmentvariabledefinition schemaname="aeg_SourceEnvironmentId">
+  <defaultvalue>00000000-0000-0000-0000-000000000000</defaultvalue>
+  <description default="Power Platform environment GUID containing the agent to evaluate. Replace the disabled default before enabling.">
+    <label description="Power Platform environment GUID containing the agent to evaluate. Replace the disabled default before enabling." languagecode="1033" />
+  </description>
+  <displayname default="Bridge Source Environment ID">
+    <label description="Bridge Source Environment ID" languagecode="1033" />
+  </displayname>
+  <introducedversion>1.0.0.0</introducedversion>
+  <iscustomizable>1</iscustomizable>
+  <isrequired>1</isrequired>
+  <secretstore>0</secretstore>
+  <type>100000000</type>
+</environmentvariabledefinition>

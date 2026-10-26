@@ -1,5 +1,9 @@
 # Evaluation bridge: sanitized source and create-only installer
 
+> **Recommended:** use the [unmanaged solution and portal installation guide](../Solution/README.md).
+> This earlier source-based installer remains available as an advanced option;
+> it is not required when importing the solution.
+
 This is a new copy of the existing evaluation bridge. The public definition
 contains placeholders rather than connection instances, caller identities or
 environment IDs. Installing it **creates a new flow** and never updates an
@@ -16,9 +20,10 @@ existing one.
 - [.gitignore](.gitignore): local configuration stays in `.local/` or
   `*.local.json` files and is excluded from Git.
 
-The JSON is not a portal-import ZIP. The tested installation mechanism is the
-Power Automate management API used by the script. No raw flow export or untested
-solution ZIP is published.
+The JSON in this directory is not a portal-import ZIP. This advanced option uses
+the Power Automate management API. The separately published
+[unmanaged solution ZIP](../Solution/README.md) uses the normal Solutions import
+experience and includes environment-variable definitions and a connection reference.
 
 ## Prerequisites
 

@@ -1,9 +1,10 @@
 # Complete pipeline and bridge samples
 
-These are **new publication copies** of the producer pipelines and evaluation
-bridge. The previously published deployment pipeline, template, helpers and root
-README are preserved unchanged as the original snapshot. This guide describes
-the additional, privacy-oriented setup.
+These are **separate publication copies** of the producer pipelines and evaluation
+bridge. Existing deployed Power Platform and Azure DevOps assets remain intact.
+The recommended bridge installation is now a standard **unmanaged solution import**.
+
+**[Download and install the unmanaged bridge solution](PowerAutomate/Solution/README.md).**
 
 ## What is included
 
@@ -13,7 +14,8 @@ the additional, privacy-oriented setup.
 | CI Build copy | [ci-build.yml](Samples/AzureDevOps/PipelineDefinitions/ci-build.yml) |
 | Evaluation-gated deployment copy with private credential passing | [deploy-solution-with-agent-evaluation-private.yml](Samples/AzureDevOps/PipelineDefinitions/deploy-solution-with-agent-evaluation-private.yml) |
 | Producer configuration and script dependencies | [Azure DevOps setup](Samples/AzureDevOps/README.md) |
-| Sanitized Power Automate bridge source and create-only installer | [Bridge setup](PowerAutomate/Bridge/README.md) |
+| Unmanaged Power Automate bridge solution and portal setup | [Solution setup](PowerAutomate/Solution/README.md) |
+| Earlier advanced source-based bridge option | [Source installer](PowerAutomate/Bridge/README.md) |
 | Verification scope and privacy limitations | [Validation record](VALIDATION.md) |
 
 ```text
@@ -44,9 +46,10 @@ the existing deployed pipelines and their scripts are not changed by this repo.
 1. Copy the sample repository into a **private Azure Repos repository**.
 2. Install Power Platform Build Tools and configure DEV/TEST service connections
    and variable groups using the [producer guide](Samples/AzureDevOps/README.md).
-3. Use the [bridge installer](PowerAutomate/Bridge/README.md) to create a **new,
-   stopped** flow bound to your environment, Copilot Studio connection and allowed
-   automation identity. Review its configuration, then enable your new instance.
+3. Import the [unmanaged bridge solution](PowerAutomate/Solution/README.md) into
+   your source environment through **Solutions > Import solution**. Bind the
+   connection reference, configure its three current environment-variable values,
+   then enable the new flow after reviewing caller restrictions.
 4. Configure the deployment pipeline's existing source/target and bridge variables.
 5. Create new Azure DevOps definitions for the three YAML entry points above.
    Name the CI producer **CI Build**, matching the deployment pipeline resource.
@@ -56,9 +59,11 @@ the existing deployed pipelines and their scripts are not changed by this repo.
 8. Run the new deployment copy with that `SolutionName` and select its CI build.
    Only a complete passing evaluation authorizes the exact managed CI package.
 
-A cloud flow JSON definition is **not** a Power Automate portal import ZIP. This
-release provides inspectable source and a tested create-only installer instead
-of an unverified archive. Setup values and generated callback URLs stay local.
+Use the unmanaged ZIP in **Solutions > Import solution**, not the legacy
+**My flows > Import package** page. The package has been imported and verified in
+a second environment. The earlier source installer remains an optional advanced
+alternative; it is not needed for the recommended solution installation.
+Setup values and generated callback URLs stay in private runtime configuration.
 
 ## Privacy and provenance
 

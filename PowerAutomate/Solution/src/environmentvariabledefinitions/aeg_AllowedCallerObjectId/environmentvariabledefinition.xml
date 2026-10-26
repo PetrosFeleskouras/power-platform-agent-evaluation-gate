@@ -1,0 +1,14 @@
+<environmentvariabledefinition schemaname="aeg_AllowedCallerObjectId">
+  <defaultvalue>00000000-0000-0000-0000-000000000000</defaultvalue>
+  <description default="Entra object ID of the service principal allowed to invoke this flow. Replace the disabled default before enabling.">
+    <label description="Entra object ID of the service principal allowed to invoke this flow. Replace the disabled default before enabling." languagecode="1033" />
+  </description>
+  <displayname default="Bridge Allowed Caller Object ID">
+    <label description="Bridge Allowed Caller Object ID" languagecode="1033" />
+  </displayname>
+  <introducedversion>1.0.0.0</introducedversion>
+  <iscustomizable>1</iscustomizable>
+  <isrequired>1</isrequired>
+  <secretstore>0</secretstore>
+  <type>100000000</type>
+</environmentvariabledefinition>

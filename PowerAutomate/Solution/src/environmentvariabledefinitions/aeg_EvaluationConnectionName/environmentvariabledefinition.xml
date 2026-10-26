@@ -1,0 +1,14 @@
+<environmentvariabledefinition schemaname="aeg_EvaluationConnectionName">
+  <defaultvalue>CONFIGURE_CONNECTION_NAME</defaultvalue>
+  <description default="Connection instance name bound to the Copilot Studio connection reference; used as the evaluation profile.">
+    <label description="Connection instance name bound to the Copilot Studio connection reference; used as the evaluation profile." languagecode="1033" />
+  </description>
+  <displayname default="Bridge Evaluation Connection Name">
+    <label description="Bridge Evaluation Connection Name" languagecode="1033" />
+  </displayname>
+  <introducedversion>1.0.0.0</introducedversion>
+  <iscustomizable>1</iscustomizable>
+  <isrequired>1</isrequired>
+  <secretstore>0</secretstore>
+  <type>100000000</type>
+</environmentvariabledefinition>
